@@ -1,7 +1,7 @@
 """
 I/O for Abaqus inp files.
 """
-from pathlib import Path
+import pathlib
 
 import numpy
 
@@ -96,7 +96,6 @@ meshio_to_abaqus_type = {v: k for k, v in abaqus_to_meshio_type.items()}
 
 def read(filename):
     """Reads a Abaqus inp file."""
-
     with open_file(filename, "r") as f:
         out = read_buffer(f)
     return out
@@ -104,7 +103,7 @@ def read(filename):
 
 def read_buffer(f):
     # Initialize the optional data fields
-    points = numpy.empty([0, 3], dtype=numpy.float64)
+    points = []
     cells = []
     cell_ids = []
     point_sets = {}
@@ -127,15 +126,7 @@ def read_buffer(f):
 
         keyword = line.partition(",")[0].strip().replace("*", "").upper()
         if keyword == "NODE":
-            points_in, point_ids_in, line = _read_nodes(f)
-            if len(points) > 0:
-                point_ids = {
-                    nid: ind + len(points) for nid, ind in point_ids_in.items()
-                }
-            else:
-                point_ids = point_ids_in
-            points = numpy.concatenate([points, points_in])
-
+            points, point_ids, line = _read_nodes(f)
         elif keyword == "ELEMENT":
             params_map = get_param_map(line, required_keys=["TYPE"])
             cell_type, cells_data, ids, sets, line = _read_cells(
@@ -178,20 +169,27 @@ def read_buffer(f):
                     else:
                         raise ReadError(f"Unknown cell set '{set_name}'")
         elif keyword == "INCLUDE":
-            incl_ref = line.lower().split("input=")[-1].rstrip().replace("\\", "/")
-            if Path(incl_ref).exists() is False:
-                cd = Path(f.name).parents[0]
-                incl_ref = Path(cd, incl_ref).absolute()
-            with open(incl_ref, "r") as d:
-                submsh = read_buffer(d)
+            # Splitting line to get external input file path (example: *INCLUDE,INPUT=wInclude_bulk.inp)
+            ext_input_file = pathlib.Path(line.split("=")[-1].strip())
+            if ext_input_file.exists() is False:
+                cd = pathlib.Path(f.name).parent
+                ext_input_file = cd / ext_input_file
 
-            points = numpy.concatenate((points, submsh.points))
-            cells += submsh.cells
-            point_data.update(submsh.point_data)
-            cell_data.update(submsh.cell_data)
-            field_data.update(submsh.field_data)
-            point_sets.update(submsh.point_sets)
-            cell_sets.update(submsh.cell_sets)
+            # Read contents from external input file into mesh object
+            out = read(ext_input_file)
+
+            # Merge contents of external file only if it is containing mesh data
+            if len(out.points) > 0:
+                points, cells = merge(
+                    out,
+                    points,
+                    cells,
+                    point_data,
+                    cell_data,
+                    field_data,
+                    point_sets,
+                    cell_sets,
+                )
 
             line = f.readline()
         else:
@@ -275,6 +273,56 @@ def _read_cells(f, params_map, point_ids):
     )
 
     return cell_type, numpy.array(cells), cell_ids, cell_sets, line
+
+
+def merge(
+    mesh, points, cells, point_data, cell_data, field_data, point_sets, cell_sets
+):
+    """
+    Merge Mesh object into existing containers for points, cells, sets, etc..
+
+    :param mesh:
+    :param points:
+    :param cells:
+    :param point_data:
+    :param cell_data:
+    :param field_data:
+    :param point_sets:
+    :param cell_sets:
+    :type mesh: Mesh
+    """
+    ext_points = numpy.array([p for p in mesh.points])
+
+    if len(points) > 0:
+        new_point_id = points.shape[0]
+        # new_cell_id = len(cells) + 1
+        points = numpy.concatenate([points, ext_points])
+    else:
+        # new_cell_id = 0
+        new_point_id = 0
+        points = ext_points
+
+    cnt = 0
+    for c in mesh.cells:
+        new_data = numpy.array([d + new_point_id for d in c.data])
+        cells.append(CellBlock(c.type, new_data))
+        cnt += 1
+
+    # The following aren't currently included in the abaqus parser, and are therefore excluded?
+    # point_data.update(mesh.point_data)
+    # cell_data.update(mesh.cell_data)
+    # field_data.update(mesh.field_data)
+
+    # Update point and cell sets to account for change in cell and point ids
+    for key, val in mesh.point_sets.items():
+        point_sets[key] = [x + new_point_id for x in val]
+
+    # Todo: Add support for merging cell sets
+    # cellblockref = [[] for i in range(cnt-new_cell_id)]
+    # for key, val in mesh.cell_sets.items():
+    #     cell_sets[key] = cellblockref + [numpy.array([x for x in val[0]])]
+
+    return points, cells
 
 
 def get_param_map(word, required_keys=None):

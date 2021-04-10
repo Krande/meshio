@@ -7,7 +7,7 @@ import logging
 import struct
 from ctypes import c_double, c_float
 
-import numpy
+import numpy as np
 
 from .._common import _pick_first_int_data
 from .._exceptions import ReadError
@@ -74,7 +74,7 @@ def read_binary_buffer(f):
     # the file version
     keytype = "i4"
 
-    code = numpy.fromfile(f, count=1, dtype=keytype).item()
+    code = np.fromfile(f, count=1, dtype=keytype).item()
 
     if code != 1 and code != 16777216:
         raise ReadError("Invalid code")
@@ -87,7 +87,7 @@ def read_binary_buffer(f):
         postype += swapped
         keytype = swapped + keytype
 
-    version = numpy.fromfile(f, count=1, dtype=keytype).item()
+    version = np.fromfile(f, count=1, dtype=keytype).item()
 
     if version < 1 or version > 4:
         raise ReadError("Invalid version")
@@ -109,20 +109,20 @@ def read_binary_buffer(f):
         ftype += "f8"
         postype += "i8"
 
-    field = numpy.fromfile(f, count=1, dtype=keytype).item()
+    field = np.fromfile(f, count=1, dtype=keytype).item()
 
     if field != 3:  # =  GmfDimension
         raise ReadError("Invalid dimension code : " + str(field) + " it should be 3")
 
-    numpy.fromfile(f, count=1, dtype=postype)
+    np.fromfile(f, count=1, dtype=postype)
 
-    dim = numpy.fromfile(f, count=1, dtype=keytype).item()
+    dim = np.fromfile(f, count=1, dtype=keytype).item()
 
     if dim != 2 and dim != 3:
         raise ReadError("Invalid mesh dimension : " + str(dim))
 
     while True:
-        field = numpy.fromfile(f, count=1, dtype=keytype)
+        field = np.fromfile(f, count=1, dtype=keytype)
 
         if field.size == 0:
             msg = "End-of-file reached before GmfEnd keyword"
@@ -141,15 +141,15 @@ def read_binary_buffer(f):
         if field_code[0] == "GmfReserved":
             continue
 
-        numpy.fromfile(f, count=1, dtype=postype)
+        np.fromfile(f, count=1, dtype=postype)
 
         nitems = 1
         if field_code[1] == "i":
-            nitems = numpy.fromfile(f, count=1, dtype=itype).item()
+            nitems = np.fromfile(f, count=1, dtype=itype).item()
 
         field_template = field_code[2]
-        dtype = numpy.dtype(_produce_dtype(field_template, dim, itype, ftype))
-        out = numpy.asarray(numpy.fromfile(f, count=nitems, dtype=dtype))
+        dtype = np.dtype(_produce_dtype(field_template, dim, itype, ftype))
+        out = np.asarray(np.fromfile(f, count=nitems, dtype=dtype))
         if field_code[0] not in meshio_from_medit.keys():
             msg = ("meshio doesn't know {} type. Skipping.").format(field_code[0])
             logging.warning(msg)
@@ -185,6 +185,8 @@ def read_ascii_buffer(f):
         "Hexahedra": ("hexahedron", 8),  # Frey
         "Hexaedra": ("hexahedron", 8),  # Dobrzynski
     }
+    points = None
+    dtype = None
 
     while True:
         line = f.readline()
@@ -214,8 +216,10 @@ def read_ascii_buffer(f):
         elif items[0] == "Vertices":
             if dim <= 0:
                 raise ReadError()
+            if dtype is None:
+                raise ReadError("Expected `MeshVersionFormatted` before `Vertices`")
             num_verts = int(f.readline())
-            out = numpy.fromfile(
+            out = np.fromfile(
                 f, count=num_verts * (dim + 1), dtype=dtype, sep=" "
             ).reshape(num_verts, dim + 1)
             points = out[:, :dim]
@@ -225,29 +229,35 @@ def read_ascii_buffer(f):
             # The first value is the number of elements
             num_cells = int(f.readline())
 
-            out = numpy.fromfile(
+            out = np.fromfile(
                 f, count=num_cells * (points_per_cell + 1), dtype=int, sep=" "
             ).reshape(num_cells, points_per_cell + 1)
 
             # adapt for 0-base
             cells.append((meshio_type, out[:, :points_per_cell] - 1))
             cell_data["medit:ref"].append(out[:, -1])
+        elif items[0] == "Corners":
+            # those are just discarded
+            num_corners = int(f.readline())
+            np.fromfile(f, count=num_corners, dtype=dtype, sep=" ")
         elif items[0] == "Normals":
             # those are just discarded
             num_normals = int(f.readline())
-            numpy.fromfile(f, count=num_normals * dim, dtype=dtype, sep=" ").reshape(
+            np.fromfile(f, count=num_normals * dim, dtype=dtype, sep=" ").reshape(
                 num_normals, dim
             )
         elif items[0] == "NormalAtVertices":
             # those are just discarded
             num_normal_at_vertices = int(f.readline())
-            numpy.fromfile(
+            np.fromfile(
                 f, count=num_normal_at_vertices * 2, dtype=int, sep=" "
             ).reshape(num_normal_at_vertices, 2)
         else:
             if items[0] != "End":
                 raise ReadError("Unknown keyword '{}'.".format(items[0]))
 
+    if points is None:
+        raise ReadError("Expected `Vertices`")
     return Mesh(points, cells, point_data=point_data, cell_data=cell_data)
 
 
@@ -260,7 +270,7 @@ def write(filename, mesh, float_fmt=".16e"):
 
 def write_ascii_file(filename, mesh, float_fmt=".16e"):
     with open_file(filename, "wb") as fh:
-        version = {numpy.dtype(c_float): 1, numpy.dtype(c_double): 2}[mesh.points.dtype]
+        version = {np.dtype(c_float): 1, np.dtype(c_double): 2}[mesh.points.dtype]
         # N. B.: PEP 461 Adding % formatting to bytes and bytearray
         fh.write(b"MeshVersionFormatted %d\n" % version)
 
@@ -279,7 +289,7 @@ def write_ascii_file(filename, mesh, float_fmt=".16e"):
                 "Medit can only write one point data array. "
                 "Picking {}, skipping {}.".format(labels_key, ", ".join(other))
             )
-        labels = mesh.point_data[labels_key] if labels_key else numpy.ones(n, dtype=int)
+        labels = mesh.point_data[labels_key] if labels_key else np.ones(n, dtype=int)
 
         fmt = " ".join(["{:" + float_fmt + "}"] * d) + " {:d}\n"
         for x, label in zip(mesh.points, labels):
@@ -320,7 +330,7 @@ def write_ascii_file(filename, mesh, float_fmt=".16e"):
             labels = (
                 mesh.cell_data[labels_key][k]
                 if labels_key
-                else numpy.ones(len(data), dtype=data.dtype)
+                else np.ones(len(data), dtype=data.dtype)
             )
 
             fmt = " ".join(["{:d}"] * (num + 1)) + "\n"
@@ -353,10 +363,10 @@ def write_binary_file(f, mesh):
             itype = "i8"
             version = 4
 
-        itype_size = numpy.dtype(itype).itemsize
-        ftype_size = numpy.dtype(ftype).itemsize
-        postype_size = numpy.dtype(postype).itemsize
-        keyword_size = numpy.dtype(keytype).itemsize
+        itype_size = np.dtype(itype).itemsize
+        ftype_size = np.dtype(ftype).itemsize
+        postype_size = np.dtype(postype).itemsize
+        keyword_size = np.dtype(keytype).itemsize
 
         code = 1
         field = 3  # GmfDimension
@@ -364,10 +374,8 @@ def write_binary_file(f, mesh):
 
         num_verts, dim = mesh.points.shape
 
-        header_type = numpy.dtype(
-            ",".join([keytype, keytype, keytype, postype, keytype])
-        )
-        tmp_array = numpy.empty(1, dtype=header_type)
+        header_type = np.dtype(",".join([keytype, keytype, keytype, postype, keytype]))
+        tmp_array = np.empty(1, dtype=header_type)
         tmp_array["f0"] = code
         tmp_array["f1"] = version
         tmp_array["f2"] = field
@@ -382,15 +390,15 @@ def write_binary_file(f, mesh):
         pos += num_verts * dim * ftype_size
         pos += num_verts * itype_size
         pos += keyword_size + postype_size + itype_size
-        header_type = numpy.dtype(",".join([keytype, postype, itype]))
-        tmp_array = numpy.empty(1, dtype=header_type)
+        header_type = np.dtype(",".join([keytype, postype, itype]))
+        tmp_array = np.empty(1, dtype=header_type)
         tmp_array["f0"] = field
         tmp_array["f1"] = pos
         tmp_array["f2"] = num_verts
         tmp_array.tofile(fh)
 
         field_template = field_code[2]
-        dtype = numpy.dtype(_produce_dtype(field_template, dim, itype, ftype))
+        dtype = np.dtype(_produce_dtype(field_template, dim, itype, ftype))
 
         labels_key, other = _pick_first_int_data(mesh.point_data)
         if labels_key and other:
@@ -401,10 +409,10 @@ def write_binary_file(f, mesh):
         labels = (
             mesh.point_data[labels_key]
             if labels_key
-            else numpy.ones(num_verts, dtype=itype)
+            else np.ones(num_verts, dtype=itype)
         )
 
-        tmp_array = numpy.empty(num_verts, dtype=dtype)
+        tmp_array = np.empty(num_verts, dtype=dtype)
         tmp_array["f0"] = mesh.points
         tmp_array["f1"] = labels
         tmp_array.tofile(fh)
@@ -441,8 +449,8 @@ def write_binary_file(f, mesh):
             pos += num_cells * (num_verts + 1) * itype_size
             pos += keyword_size + postype_size + itype_size
 
-            header_type = numpy.dtype(",".join([keytype, postype, itype]))
-            tmp_array = numpy.empty(1, dtype=header_type)
+            header_type = np.dtype(",".join([keytype, postype, itype]))
+            tmp_array = np.empty(1, dtype=header_type)
             tmp_array["f0"] = medit_key
             tmp_array["f1"] = pos
             tmp_array["f2"] = num_cells
@@ -452,12 +460,12 @@ def write_binary_file(f, mesh):
             labels = (
                 mesh.cell_data[labels_key][k]
                 if labels_key
-                else numpy.ones(len(data), dtype=data.dtype)
+                else np.ones(len(data), dtype=data.dtype)
             )
             field_template = medit_codes[medit_key][2]
-            dtype = numpy.dtype(_produce_dtype(field_template, dim, itype, ftype))
+            dtype = np.dtype(_produce_dtype(field_template, dim, itype, ftype))
 
-            tmp_array = numpy.empty(num_cells, dtype=dtype)
+            tmp_array = np.empty(num_cells, dtype=dtype)
             i = 0
             for col_type in dtype.names[:-1]:
                 tmp_array[col_type] = data[:, i] + 1
@@ -468,8 +476,8 @@ def write_binary_file(f, mesh):
 
         pos = 0
         field = 54  # GmfEnd
-        header_type = numpy.dtype(",".join([keytype, postype]))
-        tmp_array = numpy.empty(1, dtype=header_type)
+        header_type = np.dtype(",".join([keytype, postype]))
+        tmp_array = np.empty(1, dtype=header_type)
         tmp_array["f0"] = field
         tmp_array["f1"] = pos
         tmp_array.tofile(fh)

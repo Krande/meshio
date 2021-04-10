@@ -1,7 +1,7 @@
 import pathlib
 
 import helpers
-import numpy
+import numpy as np
 import pytest
 
 import meshio
@@ -10,6 +10,7 @@ import meshio
 @pytest.mark.parametrize(
     "mesh",
     [
+        helpers.empty_mesh,
         helpers.tri_mesh,
         helpers.tri_mesh_2d,
         helpers.triangle6_mesh,
@@ -34,7 +35,7 @@ def test_reference_file(filename):
     mesh = meshio.read(filename)
 
     # points
-    assert numpy.isclose(mesh.points.sum(), 16.5316866)
+    assert np.isclose(mesh.points.sum(), 16.5316866)
 
     # cells
     ref_num_cells = {

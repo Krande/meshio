@@ -2,12 +2,13 @@ import pathlib
 from functools import partial
 
 import helpers
-import numpy
+import numpy as np
 import pytest
 
 import meshio
 
 test_set = [
+    helpers.empty_mesh,
     helpers.line_mesh,
     helpers.tri_mesh_2d,
     helpers.tri_mesh,
@@ -20,6 +21,8 @@ test_set = [
     helpers.hex_mesh,
     helpers.hex20_mesh,
     helpers.polygon_mesh,
+    helpers.pyramid_mesh,
+    helpers.wedge_mesh,
     helpers.add_point_data(helpers.tri_mesh, 1),
     helpers.add_point_data(helpers.tri_mesh, 2),
     helpers.add_point_data(helpers.tri_mesh, 3),
@@ -58,7 +61,7 @@ def test_reference_file(filename, ref_sum, ref_num_cells, binary):
 
     mesh = meshio.read(filename)
     tol = 1.0e-2
-    s = numpy.sum(mesh.points)
+    s = np.sum(mesh.points)
     assert abs(s - ref_sum) < tol * ref_sum
     assert mesh.cells[0].type == "triangle"
     assert len(mesh.cells[0].data) == ref_num_cells

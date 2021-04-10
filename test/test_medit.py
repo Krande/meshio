@@ -1,7 +1,7 @@
-import os
+import pathlib
 
 import helpers
-import numpy
+import numpy as np
 import pytest
 
 import meshio
@@ -10,6 +10,7 @@ import meshio
 @pytest.mark.parametrize(
     "mesh",
     [
+        helpers.empty_mesh,
         helpers.line_mesh,
         helpers.tri_mesh,
         helpers.tri_mesh_2d,
@@ -64,8 +65,8 @@ def test_reference_file(
     ref_num_hex,
     ref_tag_counts,
 ):
-    this_dir = os.path.dirname(os.path.abspath(__file__))
-    filename = os.path.join(this_dir, "meshes", "medit", filename)
+    this_dir = pathlib.Path(__file__).resolve().parent
+    filename = this_dir / "meshes" / "medit" / filename
 
     mesh = meshio.read(filename)
     assert mesh.points.shape[0] == ref_num_points
@@ -124,10 +125,10 @@ def test_reference_file(
             continue
         all_tags.append(mesh.cell_data["medit:ref"][k])
 
-    all_tags = numpy.concatenate(all_tags)
+    all_tags = np.concatenate(all_tags)
 
     # validate against known values
-    unique, counts = numpy.unique(all_tags, return_counts=True)
+    unique, counts = np.unique(all_tags, return_counts=True)
     tags = dict(zip(unique, counts))
     assert tags.keys() == ref_tag_counts.keys()
     for key in tags.keys():

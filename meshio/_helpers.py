@@ -1,6 +1,7 @@
 import pathlib
+from typing import List, Optional
 
-import numpy
+import numpy as np
 
 from ._common import num_nodes_per_cell
 from ._exceptions import ReadError, WriteError
@@ -12,7 +13,7 @@ reader_map = {}
 _writer_map = {}
 
 
-def register(name, extensions, reader, writer_map):
+def register(name: str, extensions: List[str], reader, writer_map):
     for ext in extensions:
         extension_to_filetype[ext] = name
 
@@ -21,7 +22,7 @@ def register(name, extensions, reader, writer_map):
     _writer_map.update(writer_map)
 
 
-def _filetype_from_path(path):
+def _filetype_from_path(path: pathlib.Path):
     ext = ""
     out = None
     for suffix in reversed(path.suffixes):
@@ -34,7 +35,7 @@ def _filetype_from_path(path):
     return out
 
 
-def read(filename, file_format=None):
+def read(filename, file_format: Optional[str] = None):
     """Reads an unstructured mesh with added data.
 
     :param filenames: The files/PathLikes to read from.
@@ -80,10 +81,10 @@ def write_points_cells(
     file_format=None,
     **kwargs,
 ):
-    points = numpy.asarray(points)
+    points = np.asarray(points)
     if isinstance(cells, dict):
         cells = [CellBlock(name, vals) for name, vals in cells.items()]
-    cells = [(key, numpy.asarray(value)) for key, value in cells]
+    cells = [(key, np.asarray(value)) for key, value in cells]
     mesh = Mesh(
         points,
         cells,
@@ -93,10 +94,10 @@ def write_points_cells(
         point_sets=point_sets,
         cell_sets=cell_sets,
     )
-    return write(filename, mesh, file_format=file_format, **kwargs)
+    mesh.write(filename, file_format=file_format, **kwargs)
 
 
-def write(filename, mesh, file_format=None, **kwargs):
+def write(filename, mesh: Mesh, file_format: Optional[str] = None, **kwargs):
     """Writes mesh together with data to a file.
 
     :params filename: File to write to.

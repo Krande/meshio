@@ -1,12 +1,13 @@
 import pathlib
 
 import helpers
-import numpy
+import numpy as np
 import pytest
 
 import meshio
 
 test_set = [
+    # helpers.empty_mesh,
     helpers.line_mesh,
     helpers.tri_mesh,
     helpers.triangle6_mesh,
@@ -18,16 +19,18 @@ test_set = [
     helpers.tet10_mesh,
     helpers.hex_mesh,
     helpers.hex20_mesh,
+    helpers.pyramid_mesh,
+    helpers.wedge_mesh,
     helpers.polyhedron_mesh,
     helpers.add_point_data(helpers.tri_mesh, 1),
     helpers.add_point_data(helpers.tri_mesh, 2),
     helpers.add_point_data(helpers.tri_mesh, 3),
-    helpers.add_cell_data(helpers.tri_mesh, [("a", (), numpy.float64)]),
-    helpers.add_cell_data(helpers.tri_quad_mesh, [("a", (), numpy.float64)]),
-    helpers.add_cell_data(helpers.tri_mesh, [("a", (2,), numpy.float32)]),
-    helpers.add_cell_data(helpers.tri_mesh, [("b", (3,), numpy.float64)]),
-    helpers.add_cell_data(helpers.polygon_mesh, [("a", (), numpy.float32)]),
-    helpers.add_cell_data(helpers.polyhedron_mesh, [("a", (2,), numpy.float32)]),
+    helpers.add_cell_data(helpers.tri_mesh, [("a", (), np.float64)]),
+    helpers.add_cell_data(helpers.tri_quad_mesh, [("a", (), np.float64)]),
+    helpers.add_cell_data(helpers.tri_mesh, [("a", (2,), np.float32)]),
+    helpers.add_cell_data(helpers.tri_mesh, [("b", (3,), np.float64)]),
+    helpers.add_cell_data(helpers.polygon_mesh, [("a", (), np.float32)]),
+    helpers.add_cell_data(helpers.polyhedron_mesh, [("a", (2,), np.float32)]),
 ]
 
 
@@ -73,4 +76,4 @@ def test_read_from_file(filename, ref_cells, ref_num_cells, ref_num_pnt):
 
 
 if __name__ == "__main__":
-    test(helpers.tet10_mesh, binary=False)
+    test(helpers.tet10_mesh, (True, None))

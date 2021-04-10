@@ -2,7 +2,7 @@
 I/O for MED/Salome, cf.
 <https://docs.salome-platform.org/latest/dev/MEDCoupling/developer/med-file.html>.
 """
-import numpy
+import numpy as np
 
 from .._common import num_nodes_per_cell
 from .._exceptions import ReadError, WriteError
@@ -29,7 +29,7 @@ meshio_to_med_type = {
     "wedge15": "P15",
 }
 med_to_meshio_type = {v: k for k, v in meshio_to_med_type.items()}
-numpy_void_str = numpy.string_("")
+numpy_void_str = np.string_("")
 
 
 def read(filename):
@@ -47,6 +47,8 @@ def read(filename):
     mesh_name = list(meshes)[0]
     mesh = mesh_ensemble[mesh_name]
 
+    dim = mesh.attrs["ESP"]
+
     # Possible time-stepping
     if "NOE" not in mesh:
         # One needs NOE (node) and MAI (French maillage, meshing) data. If they
@@ -54,19 +56,19 @@ def read(filename):
         time_step = mesh.keys()
         if len(time_step) != 1:
             raise ReadError(
-                "Must only contain exactly 1 time-step, found {}.".format(
-                    len(time_step)
-                )
+                f"Must only contain exactly 1 time-step, found {len(time_step)}."
             )
         mesh = mesh[list(time_step)[0]]
 
     # Initialize data
-    point_data, cell_data, field_data = {}, {}, {}
+    point_data = {}
+    cell_data = {}
+    field_data = {}
 
     # Points
     pts_dataset = mesh["NOE"]["COO"]
     n_points = pts_dataset.attrs["NBR"]
-    points = pts_dataset[()].reshape(n_points, -1, order="F")
+    points = pts_dataset[()].reshape((n_points, dim), order="F")
 
     # Point tags
     if "FAM" in mesh["NOE"]:
@@ -122,6 +124,11 @@ def read(filename):
 
 def _read_data(fields, profiles, cell_types, point_data, cell_data, field_data):
     for name, data in fields.items():
+        if "NOM" in data.attrs:
+            if "med:nom" not in field_data:
+                field_data["med:nom"] = []
+            field_data["med:nom"].append(data.attrs["NOM"].decode().split())
+
         time_step = sorted(data.keys())  # associated time-steps
         if len(time_step) == 1:  # single time-step
             names = [name]  # do not change field name
@@ -159,7 +166,7 @@ def _read_nodal_data(med_data, profiles):
         n_data = profiles[profile].attrs["NBR"]
         index_profile = profiles[profile]["PFL"][()] - 1
         values_profile = data_profile["CO"][()].reshape(n_data, -1, order="F")
-        values = numpy.full((n_points, values_profile.shape[1]), numpy.nan)
+        values = np.full((n_points, values_profile.shape[1]), np.nan)
         values[index_profile] = values_profile
     if values.shape[-1] == 1:  # cut off for scalars
         values = values[:, 0]
@@ -179,8 +186,8 @@ def _read_cell_data(med_data, profiles):
         values_profile = data_profile["CO"][()].reshape(
             n_data, n_gauss_points, -1, order="F"
         )
-        values = numpy.full(
-            (n_cells, values_profile.shape[1], values_profile.shape[2]), numpy.nan
+        values = np.full(
+            (n_cells, values_profile.shape[1], values_profile.shape[2]), np.nan
         )
         values[index_profile] = values_profile
 
@@ -205,7 +212,7 @@ def _read_families(fas_data):
     return families
 
 
-def write(filename, mesh, add_global_ids=True):
+def write(filename, mesh):
     import h5py
 
     # MED doesn't support compression,
@@ -231,10 +238,10 @@ def write(filename, mesh, add_global_ids=True):
     med_mesh.attrs.create("UNT", numpy_void_str)  # time unit
     med_mesh.attrs.create("UNI", numpy_void_str)  # spatial unit
     med_mesh.attrs.create("SRT", 1)  # sorting type MED_SORT_ITDT
-    med_mesh.attrs.create(
-        "NOM", numpy.string_(_component_names(mesh.points.shape[1]))
-    )  # component names
-    med_mesh.attrs.create("DES", numpy.string_("Mesh created with meshio"))
+    # component names:
+    names = ["X", "Y", "Z"][: mesh.points.shape[1]]
+    med_mesh.attrs.create("NOM", np.string_("".join(f"{name:<16}" for name in names)))
+    med_mesh.attrs.create("DES", np.string_("Mesh created with meshio"))
     med_mesh.attrs.create("TYP", 0)  # mesh type (MED_NON_STRUCTURE)
 
     # Time-step
@@ -250,7 +257,7 @@ def write(filename, mesh, add_global_ids=True):
     nodes_group.attrs.create("CGT", 1)
     nodes_group.attrs.create("CGS", 1)
     profile = "MED_NO_PROFILE_INTERNAL"
-    nodes_group.attrs.create("PFL", numpy.string_(profile))
+    nodes_group.attrs.create("PFL", np.string_(profile))
     coo = nodes_group.create_dataset("COO", data=mesh.points.flatten(order="F"))
     coo.attrs.create("CGT", 1)
     coo.attrs.create("NBR", len(mesh.points))
@@ -262,7 +269,7 @@ def write(filename, mesh, add_global_ids=True):
         family.attrs.create("NBR", len(mesh.points))
 
     # Cells (mailles in French)
-    if len(mesh.cells) != len(numpy.unique([c.type for c in mesh.cells])):
+    if len(mesh.cells) != len(np.unique([c.type for c in mesh.cells])):
         raise WriteError("MED files cannot have two sections of the same cell type.")
     cells_group = time_step.create_group("MAI")
     cells_group.attrs.create("CGT", 1)
@@ -271,7 +278,7 @@ def write(filename, mesh, add_global_ids=True):
         med_cells = cells_group.create_group(med_type)
         med_cells.attrs.create("CGT", 1)
         med_cells.attrs.create("CGS", 1)
-        med_cells.attrs.create("PFL", numpy.string_(profile))
+        med_cells.attrs.create("PFL", np.string_(profile))
         nod = med_cells.create_dataset("NOD", data=cells.flatten(order="F") + 1)
         nod.attrs.create("CGT", 1)
         nod.attrs.create("NBR", len(cells))
@@ -309,12 +316,17 @@ def write(filename, mesh, add_global_ids=True):
     # Write nodal/cell data
     fields = f.create_group("CHA")
 
+    name_idx = 0
+    field_names = mesh.field_data["med:nom"] if "med:nom" in mesh.field_data else []
+
     # Nodal data
     for name, data in mesh.point_data.items():
         if name == "point_tags":  # ignore point_tags already written under FAS
             continue
         supp = "NOEU"  # nodal data
-        _write_data(fields, mesh_name, profile, name, supp, data)
+        field_name = field_names[name_idx] if field_names else None
+        name_idx += 1
+        _write_data(fields, mesh_name, field_name, profile, name, supp, data)
 
     # Cell data
     # Only support writing ELEM fields with only 1 Gauss point per cell
@@ -333,20 +345,24 @@ def write(filename, mesh, add_global_ids=True):
                 supp = "ELNO"
             else:  # general ELGA data defined at unknown Gauss points
                 supp = "ELGA"
+            field_name = field_names[name_idx] if field_names else None
             _write_data(
                 fields,
                 mesh_name,
+                field_name,
                 profile,
                 name,
                 supp,
                 data,
                 med_type,
             )
+        name_idx += 1
 
 
 def _write_data(
     fields,
     mesh_name,
+    field_name,
     profile,
     name,
     supp,
@@ -360,13 +376,21 @@ def _write_data(
     # Field
     try:  # a same MED field may contain fields of different natures
         field = fields.create_group(name)
-        field.attrs.create("MAI", numpy.string_(mesh_name))
+        field.attrs.create("MAI", np.string_(mesh_name))
         field.attrs.create("TYP", 6)  # MED_FLOAT64
         field.attrs.create("UNI", numpy_void_str)  # physical unit
         field.attrs.create("UNT", numpy_void_str)  # time unit
         n_components = 1 if data.ndim == 1 else data.shape[-1]
         field.attrs.create("NCO", n_components)  # number of components
-        field.attrs.create("NOM", numpy.string_(_component_names(n_components)))
+        # names = _create_component_names(n_components)
+        # field.attrs.create("NOM", np.string_("".join(f"{name:<16}" for name in names)))
+
+        if field_name:
+            field.attrs.create(
+                "NOM", np.string_("".join(f"{name:<16}" for name in field_name))
+            )
+        else:
+            field.attrs.create("NOM", np.string_(f"{'':<16}"))
 
         # Time-step
         step = "0000000000000000000100000000000000000001"
@@ -391,7 +415,7 @@ def _write_data(
         typ = time_step.create_group("MAI." + med_type)
 
     typ.attrs.create("GAU", numpy_void_str)  # no associated Gauss points
-    typ.attrs.create("PFL", numpy.string_(profile))
+    typ.attrs.create("PFL", np.string_(profile))
     profile = typ.create_group(profile)
     profile.attrs.create("NBR", len(data))  # number of data
     if supp == "ELNO":
@@ -404,26 +428,22 @@ def _write_data(
     profile.create_dataset("CO", data=data.flatten(order="F"))
 
 
-def _component_names(n_components):
+def _create_component_names(n_components):
+    """To be correctly read in a MED viewer, each component must be a string of width
+    16. Since we do not know the physical nature of the data, we just use V1, V2,...
     """
-    To be correctly read in a MED viewer, each component must be a string of width 16.
-    Since we do not know the physical nature of the data, we just use V1, V2, ...
-    """
-    return "".join(["V%-15d" % (i + 1) for i in range(n_components)])
+    return [f"V{(i+1)}" for i in range(n_components)]
 
 
 def _family_name(set_id, name):
-    """
-    Return the FAM object name corresponding to the unique set id and a list of subset
-    names
+    """Return the FAM object name corresponding to the unique set id and a list of
+    subset names
     """
     return "FAM" + "_" + str(set_id) + "_" + "_".join(name)
 
 
 def _write_families(fm_group, tags):
-    """
-    Write point/cell tag information under FAS/[mesh_name]
-    """
+    """Write point/cell tag information under FAS/[mesh_name]"""
     for set_id, name in tags.items():
         family = fm_group.create_group(_family_name(set_id, name))
         family.attrs.create("NUM", set_id)
@@ -434,7 +454,7 @@ def _write_families(fm_group, tags):
             # make name 80 characters
             name_80 = name[i] + "\x00" * (80 - len(name[i]))
             # Needs numpy array, see <https://github.com/h5py/h5py/issues/1735>
-            dataset[i] = numpy.array([ord(x) for x in name_80])
+            dataset[i] = np.array([ord(x) for x in name_80])
 
 
 register("med", [".med"], read, {"med": write})

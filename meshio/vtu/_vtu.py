@@ -5,12 +5,11 @@ I/O for VTU.
 """
 import base64
 import logging
-import lzma
 import re
 import sys
 import zlib
 
-import numpy
+import numpy as np
 
 from ..__about__ import __version__
 from .._common import (
@@ -24,6 +23,12 @@ from .._common import (
 from .._exceptions import ReadError
 from .._helpers import register
 from .._mesh import CellBlock, Mesh
+
+# Paraview 5.8.1's built-in Python doesn't have lzma.
+try:
+    import lzma
+except ModuleNotFoundError:
+    lzma = None
 
 
 def num_bytes_to_num_base64_chars(num_bytes):
@@ -39,9 +44,7 @@ def _cells_from_data(connectivity, offsets, types, cell_data_raw):
     if len(offsets) != len(types):
         raise ReadError()
 
-    b = numpy.concatenate(
-        [[0], numpy.where(types[:-1] != types[1:])[0] + 1, [len(types)]]
-    )
+    b = np.concatenate([[0], np.where(types[:-1] != types[1:])[0] + 1, [len(types)]])
 
     cells = []
     cell_data = {}
@@ -51,7 +54,19 @@ def _cells_from_data(connectivity, offsets, types, cell_data_raw):
             meshio_type = vtk_to_meshio_type[types[start]]
         except KeyError:
             raise ReadError("File contains cells that meshio cannot handle.")
-        if meshio_type == "polygon":
+
+        # cells with varying number of points
+        special_cells = [
+            "polygon",
+            "VTK_LAGRANGE_CURVE",
+            "VTK_LAGRANGE_TRIANGLE",
+            "VTK_LAGRANGE_QUADRILATERAL",
+            "VTK_LAGRANGE_TETRAHEDRON",
+            "VTK_LAGRANGE_HEXAHEDRON",
+            "VTK_LAGRANGE_WEDGE",
+            "VTK_LAGRANGE_PYRAMID",
+        ]
+        if meshio_type in special_cells:
             # Polygons have unknown and varying number of nodes per cell.
             # IMPLEMENTATION NOTE: While polygons are different from other cells
             # they are much less different than polyhedral cells (for polygons,
@@ -70,15 +85,15 @@ def _cells_from_data(connectivity, offsets, types, cell_data_raw):
                 first_node = offsets[start - 1]
 
             # Start of the cell-node relation for each cell in this block
-            start_cn = numpy.hstack((first_node, offsets[start:end]))
+            start_cn = np.hstack((first_node, offsets[start:end]))
             # Find the size of each cell
-            size = numpy.diff(start_cn)
+            size = np.diff(start_cn)
 
             # Loop over all cell sizes, find all cells with this size, and assign
             # connectivity
-            for sz in numpy.unique(size):
-                items = numpy.where(size == sz)[0]
-                indices = numpy.add.outer(
+            for sz in np.unique(size):
+                items = np.where(size == sz)[0]
+                indices = np.add.outer(
                     start_cn[items + 1],
                     _vtk_to_meshio_order(types[start], sz, dtype=offsets.dtype) - sz,
                 )
@@ -92,7 +107,7 @@ def _cells_from_data(connectivity, offsets, types, cell_data_raw):
         else:
             # Non-polygonal cell. Same number of nodes per cell makes everything easier.
             n = num_nodes_per_cell[meshio_type]
-            indices = numpy.add.outer(
+            indices = np.add.outer(
                 offsets[start:end],
                 _vtk_to_meshio_order(types[start], n, dtype=offsets.dtype) - n,
             )
@@ -125,7 +140,7 @@ def _polyhedron_cells_from_data(offsets, faces, faceoffsets, cell_data_raw):
 
     # The faceoffsets describes the end of the face description for each
     # cell. Switch faceoffsets to give start points, not end points
-    faceoffsets = numpy.append([0], faceoffsets[:-1])
+    faceoffsets = np.append([0], faceoffsets[:-1])
 
     # Double loop over cells then faces.
     # This will be slow, but seems necessary to cover all cases
@@ -133,12 +148,12 @@ def _polyhedron_cells_from_data(offsets, faces, faceoffsets, cell_data_raw):
         num_faces_this_cell = faces[cell_start]
         faces_this_cell = []
         next_face = cell_start + 1
-        for fi in range(num_faces_this_cell):
+        for _ in range(num_faces_this_cell):
             num_nodes_this_face = faces[next_face]
             faces_this_cell.append(
-                numpy.array(
+                np.array(
                     faces[next_face + 1 : (next_face + num_nodes_this_face + 1)],
-                    dtype=numpy.int,
+                    dtype=int,
                 )
             )
             # Increase by number of nodes just read, plus the item giving
@@ -147,9 +162,7 @@ def _polyhedron_cells_from_data(offsets, faces, faceoffsets, cell_data_raw):
 
         # Done with this cell
         # Find number of nodes for this cell
-        num_nodes_this_cell = numpy.unique(
-            numpy.hstack(([v for v in faces_this_cell]))
-        ).size
+        num_nodes_this_cell = np.unique(np.hstack([v for v in faces_this_cell])).size
 
         key = f"polyhedron{num_nodes_this_cell}"
         if key not in cells.keys():
@@ -161,14 +174,14 @@ def _polyhedron_cells_from_data(offsets, faces, faceoffsets, cell_data_raw):
     # Cell data must be reorganized accordingly.
 
     # Start of the cell-node relations
-    start_cn = numpy.hstack((0, offsets))
-    size = numpy.diff(start_cn)
+    start_cn = np.hstack((0, offsets))
+    size = np.diff(start_cn)
 
     # Loop over all cell sizes, find all cells with this size, and store
     # cell data.
-    for sz in numpy.unique(size):
+    for sz in np.unique(size):
         # Cells with this number of nodes.
-        items = numpy.where(size == sz)[0]
+        items = np.where(size == sz)[0]
 
         # Store cell data for this set of cells
         for name, d in cell_data_raw.items():
@@ -181,23 +194,21 @@ def _polyhedron_cells_from_data(offsets, faces, faceoffsets, cell_data_raw):
 
 def _organize_cells(point_offsets, cells, cell_data_raw):
     if len(point_offsets) != len(cells):
-        raise ReadError()
+        raise ReadError("Inconsistent data!")
 
     out_cells = []
 
-    # IMPLEMENTATION NOTE: The treatment of polyhedral cells is quite
-    # a bit different from the other cells; moreover, there are some
-    # strong (?) assumptions on such cells. The processing of such cells
-    # is therefore moved to a dedicated function for the time being,
-    # while all other cell types are treated by the same function.
-    # There are still similarities between processing of polyhedral and
-    # the rest, so it may be possible to unify the implementations at a
-    # later stage.
+    # IMPLEMENTATION NOTE: The treatment of polyhedral cells is quite a bit different
+    # from the other cells; moreover, there are some strong (?) assumptions on such
+    # cells. The processing of such cells is therefore moved to a dedicated function for
+    # the time being, while all other cell types are treated by the same function.
+    # There are still similarities between processing of polyhedral and the rest, so it
+    # may be possible to unify the implementations at a later stage.
 
     # Check if polyhedral cells are present.
     polyhedral_mesh = False
     for c in cells:
-        if numpy.any(c["types"] == 42):  # vtk type 42 is polyhedral
+        if np.any(c["types"] == 42):  # vtk type 42 is polyhedral
             polyhedral_mesh = True
             break
 
@@ -207,7 +218,7 @@ def _organize_cells(point_offsets, cells, cell_data_raw):
         # these limitations, but for the moment, this is what is available.
         if len(cells) > 1:
             raise ValueError("Implementation assumes single set of cells")
-        if numpy.any(cells[0]["types"] != 42):
+        if np.any(cells[0]["types"] != 42):
             raise ValueError("Cannot handle combinations of polyhedra with other cells")
 
         # Polyhedra are specified by their faces and faceoffsets; see the function
@@ -289,10 +300,9 @@ def _parse_raw_binary(filename):
     appended_data_tag = root.find("AppendedData")
     appended_data_tag.set("encoding", "base64")
 
-    if "compressor" in root.attrib:
-        c = {"vtkLZMADataCompressor": lzma, "vtkZLibDataCompressor": zlib}[
-            root.get("compressor")
-        ]
+    compressor = root.get("compressor")
+    if compressor is not None:
+        c = {"vtkLZMADataCompressor": lzma, "vtkZLibDataCompressor": zlib}[compressor]
         root.attrib.pop("compressor")
 
         # raise ReadError("Compressed raw binary VTU files not supported.")
@@ -302,10 +312,10 @@ def _parse_raw_binary(filename):
             da_tag = root.find(".//DataArray[@offset='%d']" % i)
             da_tag.set("offset", "%d" % len(arrays))
 
-            num_blocks = int(numpy.frombuffer(data[i : i + dtype.itemsize], dtype)[0])
+            num_blocks = int(np.frombuffer(data[i : i + dtype.itemsize], dtype)[0])
             num_header_items = 3 + num_blocks
             num_header_bytes = num_header_items * dtype.itemsize
-            header = numpy.frombuffer(data[i : i + num_header_bytes], dtype)
+            header = np.frombuffer(data[i : i + num_header_bytes], dtype)
 
             block_data = b""
             j = 0
@@ -318,7 +328,7 @@ def _parse_raw_binary(filename):
                 )
                 j += block_size
 
-            block_size = numpy.array([len(block_data)]).astype(dtype).tobytes()
+            block_size = np.array([len(block_data)]).astype(dtype).tobytes()
             arrays += base64.b64encode(block_size + block_data).decode()
 
             i += j + num_header_bytes
@@ -330,7 +340,7 @@ def _parse_raw_binary(filename):
             da_tag = root.find(".//DataArray[@offset='%d']" % i)
             da_tag.set("offset", "%d" % len(arrays))
 
-            block_size = int(numpy.frombuffer(data[i : i + dtype.itemsize], dtype)[0])
+            block_size = int(np.frombuffer(data[i : i + dtype.itemsize], dtype)[0])
             arrays += base64.b64encode(
                 data[i : i + block_size + dtype.itemsize]
             ).decode()
@@ -341,16 +351,16 @@ def _parse_raw_binary(filename):
 
 
 vtu_to_numpy_type = {
-    "Float32": numpy.dtype(numpy.float32),
-    "Float64": numpy.dtype(numpy.float64),
-    "Int8": numpy.dtype(numpy.int8),
-    "Int16": numpy.dtype(numpy.int16),
-    "Int32": numpy.dtype(numpy.int32),
-    "Int64": numpy.dtype(numpy.int64),
-    "UInt8": numpy.dtype(numpy.uint8),
-    "UInt16": numpy.dtype(numpy.uint16),
-    "UInt32": numpy.dtype(numpy.uint32),
-    "UInt64": numpy.dtype(numpy.uint64),
+    "Float32": np.dtype(np.float32),
+    "Float64": np.dtype(np.float64),
+    "Int8": np.dtype(np.int8),
+    "Int16": np.dtype(np.int16),
+    "Int32": np.dtype(np.int32),
+    "Int64": np.dtype(np.int64),
+    "UInt8": np.dtype(np.uint8),
+    "UInt16": np.dtype(np.uint16),
+    "UInt32": np.dtype(np.uint32),
+    "UInt64": np.dtype(np.uint64),
 }
 numpy_to_vtu_type = {v: k for k, v in vtu_to_numpy_type.items()}
 
@@ -488,16 +498,16 @@ class VtuReader:
         if len(cell_data_raw) != len(cells):
             raise ReadError()
 
-        point_offsets = numpy.cumsum([0] + [pts.shape[0] for pts in points][:-1])
+        point_offsets = np.cumsum([0] + [pts.shape[0] for pts in points][:-1])
 
         # Now merge across pieces
         if not points:
             raise ReadError()
-        self.points = numpy.concatenate(points)
+        self.points = np.concatenate(points)
 
         if point_data:
             self.point_data = {
-                key: numpy.concatenate([pd[key] for pd in point_data])
+                key: np.concatenate([pd[key] for pd in point_data])
                 for key in point_data[0]
             }
         else:
@@ -516,9 +526,9 @@ class VtuReader:
             header_dtype = header_dtype.newbyteorder(
                 "<" if self.byte_order == "LittleEndian" else ">"
             )
-        num_bytes_per_item = numpy.dtype(header_dtype).itemsize
+        num_bytes_per_item = np.dtype(header_dtype).itemsize
         total_num_bytes = int(
-            numpy.frombuffer(byte_string[:num_bytes_per_item], header_dtype)[0]
+            np.frombuffer(byte_string[:num_bytes_per_item], header_dtype)[0]
         )
 
         # Check if block size was decoded separately
@@ -534,7 +544,7 @@ class VtuReader:
             dtype = dtype.newbyteorder(
                 "<" if self.byte_order == "LittleEndian" else ">"
             )
-        return numpy.frombuffer(byte_string[:total_num_bytes], dtype=dtype)
+        return np.frombuffer(byte_string[:total_num_bytes], dtype=dtype)
 
     def read_compressed_binary(self, data, dtype):
         # first read the block size; it determines the size of the header
@@ -543,17 +553,17 @@ class VtuReader:
             header_dtype = header_dtype.newbyteorder(
                 "<" if self.byte_order == "LittleEndian" else ">"
             )
-        num_bytes_per_item = numpy.dtype(header_dtype).itemsize
+        num_bytes_per_item = np.dtype(header_dtype).itemsize
         num_chars = num_bytes_to_num_base64_chars(num_bytes_per_item)
         byte_string = base64.b64decode(data[:num_chars])[:num_bytes_per_item]
-        num_blocks = numpy.frombuffer(byte_string, header_dtype)[0]
+        num_blocks = np.frombuffer(byte_string, header_dtype)[0]
 
         # read the entire header
         num_header_items = 3 + int(num_blocks)
         num_header_bytes = num_bytes_per_item * num_header_items
         num_header_chars = num_bytes_to_num_base64_chars(num_header_bytes)
         byte_string = base64.b64decode(data[:num_header_chars])
-        header = numpy.frombuffer(byte_string, header_dtype)
+        header = np.frombuffer(byte_string, header_dtype)
 
         # num_blocks = header[0]
         # max_uncompressed_block_size = header[1]
@@ -567,18 +577,19 @@ class VtuReader:
                 "<" if self.byte_order == "LittleEndian" else ">"
             )
 
-        byte_offsets = numpy.empty(block_sizes.shape[0] + 1, dtype=block_sizes.dtype)
+        byte_offsets = np.empty(block_sizes.shape[0] + 1, dtype=block_sizes.dtype)
         byte_offsets[0] = 0
-        numpy.cumsum(block_sizes, out=byte_offsets[1:])
+        np.cumsum(block_sizes, out=byte_offsets[1:])
 
+        assert self.compression is not None
         c = {"vtkLZMADataCompressor": lzma, "vtkZLibDataCompressor": zlib}[
             self.compression
         ]
 
         # process the compressed data
-        block_data = numpy.concatenate(
+        block_data = np.concatenate(
             [
-                numpy.frombuffer(
+                np.frombuffer(
                     c.decompress(byte_array[byte_offsets[k] : byte_offsets[k + 1]]),
                     dtype=dtype,
                 )
@@ -599,7 +610,11 @@ class VtuReader:
 
         if fmt == "ascii":
             # ascii
-            data = numpy.fromstring(c.text, dtype=dtype, sep=" ")
+            if c.text.strip() == "":
+                # https://github.com/numpy/numpy/issues/18435
+                data = np.empty((0,), dtype=dtype)
+            else:
+                data = np.fromstring(c.text, dtype=dtype, sep=" ")
         elif fmt == "binary":
             reader = (
                 self.read_uncompressed_binary
@@ -671,8 +686,8 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
             "VTU requires 3D points, but 2D points given. "
             "Appending 0 third component."
         )
-        mesh.points = numpy.column_stack(
-            [mesh.points[:, 0], mesh.points[:, 1], numpy.zeros(mesh.points.shape[0])]
+        mesh.points = np.column_stack(
+            [mesh.points[:, 0], mesh.points[:, 1], np.zeros(mesh.points.shape[0])]
         )
 
     vtk_file = ET.Element(
@@ -686,6 +701,7 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
     header_type = (
         "UInt32" if header_type is None else vtk_file.set("header_type", header_type)
     )
+    assert header_type is not None
 
     if binary and compression:
         # TODO lz4, lzma <https://vtk.org/doc/nightly/html/classvtkDataCompressor.html>
@@ -707,6 +723,7 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
             for cell_info in data:
                 new_face_info = []
                 for face_info in cell_info:
+                    face_info = np.asarray(face_info)
                     new_face_info.append(
                         face_info.astype(face_info.dtype.newbyteorder("="), copy=False)
                     )
@@ -757,7 +774,7 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
                     ]
 
                     # collect header
-                    header = numpy.array(
+                    header = np.array(
                         [num_blocks, max_block_size, last_block_size]
                         + [len(b) for b in compressed_blocks],
                         dtype=vtu_to_numpy_type[header_type],
@@ -770,7 +787,7 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
                 def text_writer(f):
                     data_bytes = data.tobytes()
                     # collect header
-                    header = numpy.array(
+                    header = np.array(
                         len(data_bytes), dtype=vtu_to_numpy_type[header_type]
                     )
                     f.write(base64.b64encode(header.tobytes() + data_bytes).decode())
@@ -781,7 +798,7 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
             def text_writer(f):
                 # This write() loop is the bottleneck for the write. Alternatives:
                 # savetxt is super slow:
-                #   numpy.savetxt(f, data.reshape(-1), fmt=fmt)
+                #   np.savetxt(f, data.reshape(-1), fmt=fmt)
                 # joining and writing is a bit faster, but consumes huge amounts of
                 # memory:
                 #   f.write("\n".join(map(fmt.format, data.reshape(-1))))
@@ -789,18 +806,17 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
                     f.write((fmt + "\n").format(item))
 
         da.text_writer = text_writer
-        return
 
     def _polyhedron_face_cells(face_cells):
         # Define the faces of each cell on the format specfied for VTU Polyhedron cells.
-        # These are defined in Mesh.polyhedron_faces, as block data. The block consists of a
-        # nested list (outer list represents cell, inner is faces for this cells), where the
-        # items of the inner list are the nodes of specific faces.
+        # These are defined in Mesh.polyhedron_faces, as block data. The block consists
+        # of a nested list (outer list represents cell, inner is faces for this cells),
+        # where the items of the inner list are the nodes of specific faces.
         #
         # The output format is specified at https://vtk.org/Wiki/VTK/Polyhedron_Support
 
         # Initialize array for size of data per cell.
-        data_size_per_cell = numpy.zeros(len(face_cells), dtype=numpy.int)
+        data_size_per_cell = np.zeros(len(face_cells), dtype=int)
 
         # The data itself is of unknown size, and cannot be initialized
         data = []
@@ -837,15 +853,18 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
         pts = ET.SubElement(piece, "Points")
         numpy_to_xml_array(pts, "Points", points)
 
-    if mesh.cells is not None:
+    if mesh.cells is not None and len(mesh.cells) > 0:
         cls = ET.SubElement(piece, "Cells")
 
+        faces = None
+        faceoffsets = None
+
         if is_polyhedron_grid:
-            # The VTK polyhedron format requires both Cell-node connectivity,
-            # and a definition of faces. The cell-node relation must be recoved
-            # from the cell-face-nodes currently in CellBlocks.
-            # NOTE: If polyhedral cells are implemented for more mesh types,
-            # this code block may be useful for those as well.
+            # The VTK polyhedron format requires both Cell-node connectivity, and a
+            # definition of faces. The cell-node relation must be recoved from the
+            # cell-face-nodes currently in CellBlocks.
+            # NOTE: If polyhedral cells are implemented for more mesh types, this code
+            # block may be useful for those as well.
             con = []
             num_nodes_per_cell = []
             for block in mesh.cells:
@@ -853,14 +872,14 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
                     nodes_this_cell = []
                     for face in cell:
                         nodes_this_cell += face.tolist()
-                    unique_nodes = numpy.unique(nodes_this_cell).tolist()
+                    unique_nodes = np.unique(nodes_this_cell).tolist()
 
                     con += unique_nodes
                     num_nodes_per_cell.append(len(unique_nodes))
 
-            connectivity = numpy.array(con)
-            offsets = numpy.hstack(([0], numpy.cumsum(num_nodes_per_cell)[:-1]))
-            offsets = numpy.cumsum(num_nodes_per_cell)
+            connectivity = np.array(con)
+            # offsets = np.hstack(([0], np.cumsum(num_nodes_per_cell)[:-1]))
+            offsets = np.cumsum(num_nodes_per_cell)
 
             # Initialize data structures for polyhedral cells
             faces = []
@@ -868,7 +887,7 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
 
         else:
             # create connectivity, offset, type arrays
-            connectivity = numpy.concatenate(
+            connectivity = np.concatenate(
                 [
                     v.data[:, _meshio_to_vtk_order(v.type, v.data.shape[1])].reshape(-1)
                     for v in mesh.cells
@@ -878,39 +897,57 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
             # offset (points to the first element of the next cell)
             offsets = [
                 v.data.shape[1]
-                * numpy.arange(1, v.data.shape[0] + 1, dtype=connectivity.dtype)
+                * np.arange(1, v.data.shape[0] + 1, dtype=connectivity.dtype)
                 for v in mesh.cells
             ]
             for k in range(1, len(offsets)):
                 offsets[k] += offsets[k - 1][-1]
-            offsets = numpy.concatenate(offsets)
+            offsets = np.concatenate(offsets)
 
         # types
         types_array = []
         for k, v in mesh.cells:
             # For polygon and polyhedron grids, the number of nodes is part of the cell
             # type key. This part must be stripped away.
-            if k[:7] == "polygon":
-                key_ = k[:7]
-            elif k[:10] == "polyhedron":
-                key_ = k[:10]
+            special_cells = [
+                "polygon",
+                "polyhedron",
+                "VTK_LAGRANGE_CURVE",
+                "VTK_LAGRANGE_TRIANGLE",
+                "VTK_LAGRANGE_QUADRILATERAL",
+                "VTK_LAGRANGE_TETRAHEDRON",
+                "VTK_LAGRANGE_HEXAHEDRON",
+                "VTK_LAGRANGE_WEDGE",
+                "VTK_LAGRANGE_PYRAMID",
+            ]
+            key_ = None
+            for string in special_cells:
+                if k.startswith(string):
+                    key_ = string
+
+            if key_ is None:
+                # No special treatment
+                key_ = k
+
+            # further adaptions for polyhedron
+            if k.startswith("polyhedron"):
                 # Get face-cell relation on the vtu format. See comments in helper
                 # function for more information of how to specify this.
                 faces_loc, faceoffsets_loc = _polyhedron_face_cells(v)
                 # Adjust offsets to global numbering
+                assert faceoffsets is not None
                 if len(faceoffsets) > 0:
                     faceoffsets_loc = [fi + faceoffsets[-1] for fi in faceoffsets_loc]
 
+                assert faces is not None
                 faces += faces_loc
                 faceoffsets += faceoffsets_loc
-            else:
-                # No special treatment
-                key_ = k
-            types_array.append(numpy.full(len(v), meshio_to_vtk_type[key_]))
 
-        types = numpy.concatenate(
+            types_array.append(np.full(len(v), meshio_to_vtk_type[key_]))
+
+        types = np.concatenate(
             types_array
-            # [numpy.full(len(v), meshio_to_vtk_type[k]) for k, v in mesh.cells]
+            # [np.full(len(v), meshio_to_vtk_type[k]) for k, v in mesh.cells]
         )
 
         numpy_to_xml_array(cls, "connectivity", connectivity)
@@ -919,10 +956,8 @@ def write(filename, mesh, binary=True, compression="zlib", header_type=None):
 
         if is_polyhedron_grid:
             # Also store face-node relation
-            numpy_to_xml_array(cls, "faces", numpy.array(faces, dtype=numpy.int))
-            numpy_to_xml_array(
-                cls, "faceoffsets", numpy.array(faceoffsets, dtype=numpy.int)
-            )
+            numpy_to_xml_array(cls, "faces", np.array(faces, dtype=int))
+            numpy_to_xml_array(cls, "faceoffsets", np.array(faceoffsets, dtype=int))
 
     if mesh.point_data:
         pd = ET.SubElement(piece, "PointData")

@@ -1,6 +1,8 @@
 import collections
+import warnings
+from typing import Optional
 
-import numpy
+import numpy as np
 
 from ._common import _topological_dimension
 
@@ -8,6 +10,9 @@ from ._common import _topological_dimension
 class CellBlock(collections.namedtuple("CellBlock", ["type", "data"])):
     def __repr__(self):
         return f"<meshio CellBlock, type: {self.type}, num cells: {len(self.data)}>"
+
+    def __len__(self):
+        return len(self.data)
 
 
 class Mesh:
@@ -23,7 +28,7 @@ class Mesh:
         gmsh_periodic=None,
         info=None,
     ):
-        self.points = points
+        self.points = np.asarray(points)
         if isinstance(cells, dict):
             # Let's not deprecate this for now.
             # import warnings
@@ -34,10 +39,13 @@ class Mesh:
             # )
             # old dict, deprecated
             self.cells = [
-                CellBlock(cell_type, data) for cell_type, data in cells.items()
+                CellBlock(cell_type, np.asarray(data))
+                for cell_type, data in cells.items()
             ]
         else:
-            self.cells = [CellBlock(cell_type, data) for cell_type, data in cells]
+            self.cells = [
+                CellBlock(cell_type, np.asarray(data)) for cell_type, data in cells
+            ]
         self.point_data = {} if point_data is None else point_data
         self.cell_data = {} if cell_data is None else cell_data
         self.field_data = {} if field_data is None else field_data
@@ -46,11 +54,31 @@ class Mesh:
         self.gmsh_periodic = gmsh_periodic
         self.info = info
 
+        # assert point data consistency and convert to numpy arrays
+        for key, item in self.point_data.items():
+            self.point_data[key] = np.asarray(item)
+            if self.point_data[key].shape[0] != self.points.shape[0]:
+                raise ValueError(
+                    f"len(points) = {len(points)}, "
+                    f'but len(point_data["{key}"]) = {len(point_data[key])}'
+                )
+
+        # assert cell data consistency and convert to numpy arrays
         for key, data in self.cell_data.items():
-            assert len(data) == len(cells), (
-                "Incompatible cell data. "
-                f"{len(cells)} cell blocks, but '{key}' has {len(data)} blocks."
-            )
+            if len(data) != len(cells):
+                raise ValueError(
+                    "Incompatible cell data. "
+                    f"{len(cells)} cell blocks, but '{key}' has {len(data)} blocks."
+                )
+
+            for k in range(len(data)):
+                data[k] = np.asarray(data[k])
+                if len(data[k]) != len(self.cells[k]):
+                    raise ValueError(
+                        "Incompatible cell data. "
+                        f"Cell block {k} has length {len(self.cells[k])}, but "
+                        f"corresponding cell data {key} item has length {len(data[k])}."
+                    )
 
     def __repr__(self):
         lines = ["<meshio mesh object>", f"  Number of points: {len(self.points)}"]
@@ -77,12 +105,27 @@ class Mesh:
             names = ", ".join(self.cell_data.keys())
             lines.append(f"  Cell data: {names}")
 
+        if self.field_data:
+            names = ", ".join(self.field_data.keys())
+            lines.append(f"  Field data: {names}")
+
         return "\n".join(lines)
+
+    def prune(self):
+        # nschloe, 2020-11:
+        warnings.warn(
+            "prune() will soon be deprecated. "
+            "Use remove_lower_dimensional_cells(), remove_orphaned_nodes() instead."
+        )
+        self.remove_lower_dimensional_cells()
+        self.remove_orphaned_nodes()
 
     def remove_lower_dimensional_cells(self):
         """Remove all cells of topological dimension lower than the max dimension in the
         mesh, i.e., in a mesh that contains tetrahedra, remove triangles, lines, etc.
         """
+        if not self.cells:
+            return
         max_topological_dim = max(_topological_dimension[c.type] for c in self.cells)
         new_cells = []
         new_cell_data = {}
@@ -111,51 +154,63 @@ class Mesh:
 
     def remove_orphaned_nodes(self):
         """Remove nodes which don't belong to any cell."""
-        all_cells_flat = numpy.concatenate([c.data.flat for c in self.cells])
-        orphaned_nodes = numpy.setdiff1d(numpy.arange(len(self.points)), all_cells_flat)
-        self.points = numpy.delete(self.points, orphaned_nodes, axis=0)
+        flat = [c.data.flat for c in self.cells]
+        if flat:
+            all_cells_flat = np.concatenate([c.data.flat for c in self.cells])
+        else:
+            all_cells_flat = []
+        orphaned_nodes = np.setdiff1d(np.arange(len(self.points)), all_cells_flat)
+
+        if len(orphaned_nodes) == 0:
+            return
+
+        self.points = np.delete(self.points, orphaned_nodes, axis=0)
         # also adapt the point data
-        for key in self.point_data:
-            self.point_data[key] = numpy.delete(
-                self.point_data[key], orphaned_nodes, axis=0
-            )
+        self.point_data = {
+            key: np.delete(val, orphaned_nodes, axis=0)
+            for key, val in self.point_data.items()
+        }
 
         # reset GLOBAL_ID
         if "GLOBAL_ID" in self.point_data:
-            self.point_data["GLOBAL_ID"] = numpy.arange(1, len(self.points) + 1)
+            n = len(self.point_data["GLOBAL_ID"])
+            assert np.all(self.point_data["GLOBAL_ID"] == np.arange(1, n + 1))
+            self.point_data["GLOBAL_ID"] = np.arange(1, len(self.points) + 1)
 
         # We now need to adapt the cells too.
-        diff = numpy.zeros(len(all_cells_flat), dtype=all_cells_flat.dtype)
+        diff = np.zeros(len(all_cells_flat), dtype=all_cells_flat.dtype)
         for orphan in orphaned_nodes:
-            diff[numpy.argwhere(all_cells_flat > orphan)] += 1
+            diff[np.argwhere(all_cells_flat > orphan)] += 1
         all_cells_flat -= diff
-        k = 0
+        i = 0
         for k, c in enumerate(self.cells):
             s = c.data.shape
-            n = numpy.prod(s)
-            self.cells[k] = CellBlock(c.type, all_cells_flat[k : k + n].reshape(s))
-            k += n
+            n = np.prod(s)
+            self.cells[k] = CellBlock(c.type, all_cells_flat[i : i + n].reshape(s))
+            i += n
 
-    def prune_z_0(self, tol=1.0e-13):
+    def prune_z_0(self, tol: float = 1.0e-13):
         """Remove third (z) component of points if it is 0 everywhere (up to a
         tolerance).
         """
-        if self.points.shape[1] == 3 and numpy.all(numpy.abs(self.points[:, 2]) < tol):
+        if self.points.shape[0] == 0:
+            return
+        if self.points.shape[1] == 3 and np.all(np.abs(self.points[:, 2]) < tol):
             self.points = self.points[:, :2]
 
-    def write(self, path_or_buf, file_format=None, **kwargs):
+    def write(self, path_or_buf, file_format: Optional[str] = None, **kwargs):
         # avoid circular import
         from ._helpers import write
 
         write(path_or_buf, self, file_format, **kwargs)
 
-    def get_cells_type(self, cell_type):
+    def get_cells_type(self, cell_type: str):
         if not any(c.type == cell_type for c in self.cells):
-            return numpy.array([], dtype=int)
-        return numpy.concatenate([c.data for c in self.cells if c.type == cell_type])
+            return np.array([], dtype=int)
+        return np.concatenate([c.data for c in self.cells if c.type == cell_type])
 
-    def get_cell_data(self, name, cell_type):
-        return numpy.concatenate(
+    def get_cell_data(self, name: str, cell_type: str):
+        return np.concatenate(
             [d for c, d in zip(self.cells, self.cell_data[name]) if c.type == cell_type]
         )
 
@@ -168,7 +223,7 @@ class Mesh:
             cells_dict[cell_type].append(data)
         # concatenate
         for key, value in cells_dict.items():
-            cells_dict[key] = numpy.concatenate(value)
+            cells_dict[key] = np.concatenate(value)
         return cells_dict
 
     @property
@@ -182,7 +237,7 @@ class Mesh:
                 cell_data_dict[key][cell_type].append(value)
 
             for cell_type, val in cell_data_dict[key].items():
-                cell_data_dict[key][cell_type] = numpy.concatenate(val)
+                cell_data_dict[key][cell_type] = np.concatenate(val)
         return cell_data_dict
 
     @property
@@ -192,6 +247,8 @@ class Mesh:
             sets_dict[key] = {}
             offsets = {}
             for members, cells in zip(member_list, self.cells):
+                if members is None:
+                    continue
                 if cells.type in offsets:
                     offset = offsets[cells.type]
                     offsets[cells.type] += cells.data.shape[0]
@@ -204,9 +261,9 @@ class Mesh:
                     sets_dict[key][cells.type] = [members + offset]
         return {
             key: {
-                cell_type: numpy.concatenate(members)
+                cell_type: np.concatenate(members)
                 for cell_type, members in sets.items()
-                if sum(map(numpy.size, members))
+                if sum(map(np.size, members))
             }
             for key, sets in sets_dict.items()
         }
@@ -215,6 +272,12 @@ class Mesh:
     def read(cls, path_or_buf, file_format=None):
         # avoid circular import
         from ._helpers import read
+
+        # 2021-02-21
+        warnings.warn(
+            "meshio.Mesh.read is deprecated, use meshio.read instead",
+            DeprecationWarning,
+        )
 
         return read(path_or_buf, file_format)
 
@@ -225,18 +288,16 @@ class Mesh:
         for k, c in enumerate(zip(*self.cell_sets.values())):
             # `c` contains the values of all cell sets for a particular cell block
             c = [([] if cc is None else cc) for cc in c]
-            # check if all numbers appear exactly once in the groups
-            d = numpy.sort(numpy.concatenate(c))
-            if numpy.all(d == numpy.arange(len(d))):
-                arr = numpy.empty(len(d), dtype=int)
-                arr[:] = numpy.nan
-                for k, cc in enumerate(c):
-                    arr[cc] = k
+            conc_c = np.concatenate(c)
+            argsort_c = np.argsort(conc_c)
+            d = conc_c[argsort_c]
+            if np.all(d == np.arange(len(d))):
+                # A typical case: All numbers appear exactly once in the groups.
+                arr = argsort_c
             else:
                 # We could just append None, but some mesh formats expect _something_
-                # here. Go for an array of NaNs.
-                arr = numpy.empty(len(self.cells[k]), dtype=int)
-                arr[:] = numpy.nan
+                # here. Go for an array of -1s. (NaN is not a legal int.)
+                arr = np.full(len(self.cells[k]), -1, dtype=int)
 
             intfun.append(arr)
 
@@ -249,13 +310,13 @@ class Mesh:
         keys = []
         for key, data in self.cell_data.items():
             # handle all int and uint data
-            if not numpy.all(v.dtype.kind in ["i", "u"] for v in data):
+            if not np.all(v.dtype.kind in ["i", "u"] for v in data):
                 continue
 
             keys.append(key)
 
             # this call can be rather expensive
-            tags = numpy.unique(numpy.concatenate(data))
+            tags = np.unique(np.concatenate(data))
 
             # try and get the names by splitting the key along "-" (this is how
             # sets_to_int_data() forms the key
@@ -266,7 +327,7 @@ class Mesh:
 
             for name, tag in zip(names, tags):
                 self.cell_sets[name] = []
-                self.cell_sets[name] = [numpy.where(d == tag)[0] for d in data]
+                self.cell_sets[name] = [np.where(d == tag)[0] for d in data]
 
         # remove the cell data
         for key in keys:

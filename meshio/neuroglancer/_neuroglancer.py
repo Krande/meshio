@@ -3,11 +3,12 @@ Neuroglancer format, used in large-scale neuropil segmentation data.
 
 Adapted from https://github.com/HumanBrainProject/neuroglancer-scripts/blob/1fcabb613a715ba17c65d52596dec3d687ca3318/src/neuroglancer_scripts/mesh.py (MIT license)
 """
+import logging
 import struct
 
 import numpy as np
 
-from .._exceptions import ReadError, WriteError
+from .._exceptions import ReadError
 from .._files import open_file
 from .._helpers import register
 from .._mesh import CellBlock, Mesh
@@ -25,8 +26,11 @@ def write_buffer(f, mesh):
     :param meshio.Mesh mesh: Mesh object to write
     """
     vertices = np.asarray(mesh.points, "<f")
-    if not any(c.type == "triangle" for c in mesh.cells):
-        raise WriteError("Neuroglancer files can only contain triangle cells.")
+    skip = [c for c in mesh.cells if c.type != "triangle"]
+    if skip:
+        logging.warning(
+            "Neuroglancer only supports triangle cells. " f'Skipping {", ".join(skip)}.'
+        )
 
     f.write(struct.pack("<I", vertices.shape[0]))
     f.write(vertices.tobytes(order="C"))
@@ -48,7 +52,7 @@ def read_buffer(file):
     num_vertices = struct.unpack("<I", file.read(4))[0]
     # TODO handle format errors
     #
-    # Use frombuffer instead of numpy.fromfile, because the latter expects a
+    # Use frombuffer instead of np.fromfile, because the latter expects a
     # real file and performs direct I/O on file.fileno(), which can fail or
     # read garbage e.g. if the file is an instance of gzip.GzipFile.
     buf = file.read(4 * 3 * num_vertices)

@@ -5,7 +5,7 @@ I/O for the TetGen file format, c.f.
 import logging
 import pathlib
 
-import numpy
+import numpy as np
 
 from ..__about__ import __version__
 from .._exceptions import ReadError, WriteError
@@ -28,8 +28,7 @@ def read(filename):
     cell_data = {}
 
     # read nodes
-    # TODO remove as_posix
-    with open(node_filename.as_posix()) as f:
+    with open(node_filename) as f:
         line = f.readline().strip()
         while len(line) == 0 or line[0] == "#":
             line = f.readline().strip()
@@ -40,15 +39,15 @@ def read(filename):
         if dim != 3:
             raise ReadError("Need 3D points.")
 
-        points = numpy.fromfile(
+        points = np.fromfile(
             f, dtype=float, count=(4 + num_attrs + num_bmarkers) * num_points, sep=" "
         ).reshape(num_points, 4 + num_attrs + num_bmarkers)
 
         node_index_base = int(points[0, 0])
-        # make sure the nodes a numbered consecutively
-        if not numpy.all(
+        # make sure the nodes are numbered consecutively
+        if not np.all(
             points[:, 0]
-            == numpy.arange(node_index_base, node_index_base + points.shape[0])
+            == np.arange(node_index_base, node_index_base + points.shape[0])
         ):
             raise ReadError()
         # read point attributes
@@ -72,10 +71,11 @@ def read(filename):
         ]
         if num_points_per_tet != 4:
             raise ReadError()
-        cells = numpy.fromfile(
+        cells = np.fromfile(
             f, dtype=int, count=(5 + num_attrs) * num_tets, sep=" "
         ).reshape(num_tets, 5 + num_attrs)
-        # read cell (region) attributes, the first is "ref", the others are "ref2", "ref3", ...
+        # read cell (region) attributes, the first is "ref", the others are "ref2",
+        # "ref3", ...
         for k in range(num_attrs):
             flag = "" if k == 0 else str(k + 1)
             cell_data["tetgen:ref" + flag] = [cells[:, 5 + k]]
@@ -103,8 +103,7 @@ def write(filename, mesh, float_fmt=".16e"):
         raise WriteError("Can only write 3D points")
 
     # write nodes
-    # TODO remove .as_posix when requiring Python 3.6
-    with open(node_filename.as_posix(), "w") as fh:
+    with open(node_filename, "w") as fh:
         # identify ":ref" key
         attr_keys = list(mesh.point_data.keys())
         ref_keys = [k for k in attr_keys if ":ref" in k]
@@ -139,19 +138,14 @@ def write(filename, mesh, float_fmt=".16e"):
             )
             fh.write(fmt.format(k, *data))
 
-    if not any(c.type == "tetra" for c in mesh.cells):
-        raise WriteError("TegGen only supports tetrahedra")
-
     if any(c.type != "tetra" for c in mesh.cells):
+        string = ", ".join([c.type for c in mesh.cells if c.type != "tetra"])
         logging.warning(
-            "TetGen only supports tetrahedra, but mesh has {}. Skipping those.".format(
-                ", ".join([c.type for c in mesh.cells if c.type != "tetra"])
-            )
+            f"TetGen only supports tetrahedra, but mesh has {string}. Skipping those."
         )
 
     # write cells
-    # TODO remove .as_posix when requiring Python 3.6
-    with open(ele_filename.as_posix(), "w") as fh:
+    with open(ele_filename, "w") as fh:
         attr_keys = list(mesh.cell_data.keys())
         ref_keys = [k for k in attr_keys if ":ref" in k]
         if len(attr_keys) > 0:
@@ -163,9 +157,7 @@ def write(filename, mesh, float_fmt=".16e"):
         fh.write(f"# This file was created by meshio v{__version__}\n")
         if nattr > 0:
             fh.write("# attribute names: {}\n".format(", ".join(attr_keys)))
-        for id, (cell_type, data) in enumerate(
-            filter(lambda c: c.type == "tetra", mesh.cells)
-        ):
+        for id, (_, data) in enumerate(filter(lambda c: c.type == "tetra", mesh.cells)):
             fh.write("{} {} {}\n".format(data.shape[0], 4, nattr))
             fmt = " ".join((5 + nattr) * ["{}"]) + "\n"
             for k, tet in enumerate(data):

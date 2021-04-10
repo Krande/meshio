@@ -2,7 +2,7 @@ import argparse
 import os
 import pathlib
 
-from .. import cgns, h5m, med, vtu, xdmf
+from .. import cgns, h5m, vtu, xdmf
 from .._helpers import _filetype_from_path, read, reader_map
 from ._helpers import _get_version_text
 
@@ -20,15 +20,13 @@ def decompress(argv=None):
     mesh = read(args.infile, file_format=args.input_format)
 
     # # Some converters (like VTK) require `points` to be contiguous.
-    # mesh.points = numpy.ascontiguousarray(mesh.points)
+    # mesh.points = np.ascontiguousarray(mesh.points)
 
     # write it out
     if fmt == "cgns":
         cgns.write(args.infile, mesh, compression=None)
     elif fmt == "h5m":
         h5m.write(args.infile, mesh, compression=None)
-    elif fmt == "med":
-        med.write(args.infile, mesh, compression=None)
     elif fmt == "vtu":
         vtu.write(args.infile, mesh, binary=True, compression=None)
     elif fmt == "xdmf":

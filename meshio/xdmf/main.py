@@ -7,7 +7,7 @@ import pathlib
 from io import BytesIO
 from xml.etree import ElementTree as ET
 
-import numpy
+import numpy as np
 
 from .._common import cell_data_from_raw, raw_from_cell_data, write_xml
 from .._exceptions import ReadError, WriteError
@@ -86,13 +86,15 @@ class XdmfReader:
             precision = "4"
 
         if data_item.get("Format") == "XML":
-            return numpy.fromstring(
-                data_item.text,
-                dtype=xdmf_to_numpy_type[(data_type, precision)],
-                sep=" ",
-            ).reshape(dims)
+            dtype = xdmf_to_numpy_type[(data_type, precision)]
+            if data_item.text.strip() == "":
+                # https://github.com/numpy/numpy/issues/18435
+                data = np.empty((0,), dtype=dtype)
+            else:
+                data = np.fromstring(data_item.text, dtype=dtype, sep=" ")
+            return data.reshape(dims)
         elif data_item.get("Format") == "Binary":
-            return numpy.fromfile(
+            return np.fromfile(
                 data_item.text.strip(), dtype=xdmf_to_numpy_type[(data_type, precision)]
             ).reshape(dims)
         elif data_item.get("Format") != "HDF":
@@ -114,7 +116,7 @@ class XdmfReader:
 
         for key in h5path.split("/"):
             f = f[key]
-        # `[()]` gives a numpy.ndarray
+        # `[()]` gives a np.ndarray
         return f[()]
 
     def read_information(self, c_data):
@@ -122,9 +124,14 @@ class XdmfReader:
         root = ET.fromstring(c_data)
         for child in root:
             str_tag = child.get("key")
-            dim = int(child.get("dim"))
+            dim = child.get("dim")
+            if dim is None:
+                raise ReadError()
+            dim = int(dim)
+            if child.text is None:
+                raise ReadError()
             num_tag = int(child.text)
-            field_data[str_tag] = numpy.array([num_tag, dim])
+            field_data[str_tag] = np.array([num_tag, dim])
         return field_data
 
     def read_xdmf2(self, root):  # noqa: C901
@@ -159,7 +166,7 @@ class XdmfReader:
                 topology_type = c.get("TopologyType")
                 if topology_type == "Mixed":
                     cells = translate_mixed_cells(
-                        numpy.fromstring(
+                        np.fromstring(
                             data_items[0].text,
                             int,
                             int(data_items[0].get("Dimensions")),
@@ -346,11 +353,11 @@ class XdmfWriter:
         #     grid, "Information", Name="Information", Value=str(len(mesh.field_data))
         # )
 
-        self.points(grid, mesh.points)
+        self.write_points(grid, mesh.points)
         # self.field_data(mesh.field_data, information)
-        self.cells(mesh.cells, grid)
-        self.point_data(mesh.point_data, grid)
-        self.cell_data(mesh.cell_data, grid)
+        self.write_cells(mesh.cells, grid)
+        self.write_point_data(mesh.point_data, grid)
+        self.write_cell_data(mesh.cell_data, grid)
 
         ET.register_namespace("xi", "https://www.w3.org/2001/XInclude/")
 
@@ -360,7 +367,7 @@ class XdmfWriter:
         if self.data_format == "XML":
             s = BytesIO()
             fmt = dtype_to_format_string[data.dtype.name]
-            numpy.savetxt(s, data, fmt)
+            np.savetxt(s, data, fmt)
             return "\n" + s.getvalue().decode()
         elif self.data_format == "Binary":
             base = os.path.splitext(self.filename)[0]
@@ -383,15 +390,11 @@ class XdmfWriter:
         )
         return os.path.basename(self.h5_filename) + ":/" + name
 
-    def points(self, grid, points):
-        if points.shape[1] == 1:
-            geometry_type = "X"
-        elif points.shape[1] == 2:
-            geometry_type = "XY"
-        else:
-            if points.shape[1] != 3:
-                raise WriteError()
-            geometry_type = "XYZ"
+    def write_points(self, grid, points):
+        if points.shape[1] > 3:
+            raise WriteError("Can only write points up to dimension 3.")
+
+        geometry_type = "XYZ"[: points.shape[1]]
 
         geo = ET.SubElement(grid, "Geometry", GeometryType=geometry_type)
         dt, prec = numpy_to_xdmf_dtype[points.dtype.name]
@@ -406,7 +409,9 @@ class XdmfWriter:
         )
         data_item.text = self.numpy_to_xml_string(points)
 
-    def cells(self, cells, grid):
+    def write_cells(self, cells, grid):
+        if len(cells) == 0:
+            return
         if len(cells) == 1:
             meshio_type = cells[0].type
             num_cells = len(cells[0].data)
@@ -439,16 +444,16 @@ class XdmfWriter:
                 TopologyType="Mixed",
                 NumberOfElements=str(total_num_cells),
             )
-            total_num_cell_items = sum(numpy.prod(c.data.shape) for c in cells)
+            total_num_cell_items = sum(np.prod(c.data.shape) for c in cells)
             num_vertices_and_lines = sum(
                 c.data.shape[0] for c in cells if c.type in {"vertex", "line"}
             )
             dim = str(total_num_cell_items + total_num_cells + num_vertices_and_lines)
-            cd = numpy.concatenate(
+            cd = np.concatenate(
                 [
-                    numpy.hstack(
+                    np.hstack(
                         [
-                            numpy.full(
+                            np.full(
                                 (value.shape[0], 2 if key in {"vertex", "line"} else 1),
                                 meshio_type_to_xdmf_index[key],
                             ),
@@ -469,7 +474,7 @@ class XdmfWriter:
             )
             data_item.text = self.numpy_to_xml_string(cd)
 
-    def point_data(self, point_data, grid):
+    def write_point_data(self, point_data, grid):
         for name, data in point_data.items():
             att = ET.SubElement(
                 grid,
@@ -490,7 +495,7 @@ class XdmfWriter:
             )
             data_item.text = self.numpy_to_xml_string(data)
 
-    def cell_data(self, cell_data, grid):
+    def write_cell_data(self, cell_data, grid):
         raw = raw_from_cell_data(cell_data)
         for name, data in raw.items():
             att = ET.SubElement(

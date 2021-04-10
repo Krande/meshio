@@ -1,6 +1,7 @@
+from typing import Optional, Union
 from xml.etree import ElementTree as ET
 
-import numpy
+import numpy as np
 
 from .._exceptions import WriteError
 from .._helpers import register
@@ -9,13 +10,17 @@ from .._helpers import register
 def write(
     filename,
     mesh,
-    float_fmt=".3f",
-    stroke_width="1",
-    force_width=None,
-    fill="none",
-    stroke="black",
+    float_fmt: str = ".3f",
+    stroke_width: Optional[str] = None,
+    # Use a default image_width (not None). If set to None, images will come out at the
+    # width of the mesh (which is okay). Some viewers (e.g., eog) have problems
+    # displaying SVGs of width around 1 since they interpret it as the width in pixels.
+    image_width: Optional[Union[int, float]] = 100,
+    # ParaView's default colors
+    fill: str = "#c8c5bd",
+    stroke: str = "#000080",
 ):
-    if mesh.points.shape[1] == 3 and not numpy.allclose(
+    if mesh.points.shape[1] == 3 and not np.allclose(
         mesh.points[:, 2], 0.0, rtol=0.0, atol=1.0e-14
     ):
         raise WriteError(
@@ -23,20 +28,26 @@ def write(
         )
 
     pts = mesh.points[:, :2].copy()
-    pts[:, 1] = numpy.max(pts[:, 1]) - pts[:, 1]
+    min_x = np.min(pts[:, 0]) if len(pts) > 0 else 0.0
+    max_x = np.max(pts[:, 0]) if len(pts) > 0 else 0.0
+    min_y = np.min(pts[:, 1]) if len(pts) > 0 else 0.0
+    max_y = np.max(pts[:, 1]) if len(pts) > 0 else 0.0
 
-    min_x = numpy.min(pts[:, 0])
-    min_y = numpy.min(pts[:, 1])
-    width = numpy.max(pts[:, 0]) - min_x
-    height = numpy.max(pts[:, 1]) - min_y
+    pts[:, 1] = max_y + min_y - pts[:, 1]
 
-    if force_width is not None:
-        scaling_factor = force_width / width
+    width = max_x - min_x
+    height = max_y - min_y
+
+    if image_width is not None and width != 0:
+        scaling_factor = image_width / width
         min_x *= scaling_factor
         min_y *= scaling_factor
         width *= scaling_factor
         height *= scaling_factor
         pts *= scaling_factor
+
+    if stroke_width is None:
+        stroke_width = width / 100
 
     fmt = " ".join(4 * [f"{{:{float_fmt}}}"])
     svg = ET.Element(
@@ -54,15 +65,16 @@ def write(
         "stroke-linejoin:bevel",
     ]
     # Use path, not polygon, because svgo converts polygons to paths and doesn't convert
-    # the style alongside. No problem it's paths all along.
+    # the style alongside. No problem if it's paths all the way.
     style.text = "path {" + "; ".join(opts) + "}"
 
     for cell_block in mesh.cells:
         if cell_block.type not in ["line", "triangle", "quad"]:
             continue
+
         if cell_block.type == "line":
             fmt = (
-                "M {{:{}}} {{:{}}}".format(float_fmt, float_fmt)
+                f"M {{:{float_fmt}}} {{:{float_fmt}}}"
                 + f"L {{:{float_fmt}}} {{:{float_fmt}}}"
             )
         elif cell_block.type == "triangle":

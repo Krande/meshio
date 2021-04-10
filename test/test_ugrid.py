@@ -1,8 +1,7 @@
 import pathlib
-import sys
 
 import helpers
-import numpy
+import numpy as np
 import pytest
 
 import meshio
@@ -10,10 +9,10 @@ import meshio
 this_dir = pathlib.Path(__file__).resolve().parent
 
 
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="requires Python 3.6 or higher")
 @pytest.mark.parametrize(
     "mesh",
     [
+        helpers.empty_mesh,
         helpers.tri_mesh,
         helpers.quad_mesh,
         helpers.tri_quad_mesh,
@@ -40,7 +39,6 @@ def test_io(mesh, accuracy, ext):
     helpers.write_read(meshio.ugrid.write, meshio.ugrid.read, mesh, accuracy, ext)
 
 
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="requires Python 3.6 or higher")
 def test_generic_io():
     helpers.generic_io("test.lb8.ugrid")
     # With additional, insignificant suffix:
@@ -49,7 +47,6 @@ def test_generic_io():
 
 # sphere_mixed.1.lb8.ugrid and hch_strct.4.lb8.ugrid created
 # using the codes from http://cfdbooks.com
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="requires Python 3.6 or higher")
 @pytest.mark.parametrize(
     "filename, ref_num_points, ref_num_triangle, ref_num_quad, ref_num_wedge, ref_num_tet, ref_num_hex, ref_tag_counts",
     [
@@ -135,10 +132,10 @@ def test_reference_file(
             continue
         all_tags.append(mesh.cell_data["ugrid:ref"][k])
 
-    all_tags = numpy.concatenate(all_tags)
+    all_tags = np.concatenate(all_tags)
 
     # validate against known values
-    unique, counts = numpy.unique(all_tags, return_counts=True)
+    unique, counts = np.unique(all_tags, return_counts=True)
     tags = dict(zip(unique, counts))
     assert tags.keys() == ref_tag_counts.keys()
     for key in tags.keys():
@@ -155,9 +152,9 @@ def _tet_volume(cell):
     | d_x d_y d_z 1 |
     """
 
-    t = numpy.ones((4, 1))
-    cell = numpy.append(cell, t, axis=1)
-    vol = -numpy.linalg.det(cell) / 6.0
+    t = np.ones((4, 1))
+    cell = np.append(cell, t, axis=1)
+    vol = -np.linalg.det(cell) / 6.0
     return vol
 
 
@@ -177,7 +174,6 @@ def _pyramid_volume(cell):
 
 # ugrid node ordering is the same for all elements except the pyramids. In order to make
 # sure we got it right read a cube split into pyramids and evaluate its volume
-@pytest.mark.skipif(sys.version_info < (3, 6), reason="requires Python 3.6 or higher")
 @pytest.mark.parametrize("filename, volume,accuracy", [("pyra_cube.ugrid", 1.0, 1e-15)])
 def test_volume(filename, volume, accuracy):
     filename = this_dir / "meshes" / "ugrid" / filename
@@ -188,10 +184,10 @@ def test_volume(filename, volume, accuracy):
     assert mesh.cells[0].data.shape == (6, 5)
     vol = 0.0
     for _cell in mesh.cells[0].data:
-        cell = numpy.array([mesh.points[i] for i in _cell])
+        cell = np.array([mesh.points[i] for i in _cell])
         v = _pyramid_volume(cell)
         vol += v
-    assert numpy.isclose(vol, 1.0, accuracy)
+    assert np.isclose(vol, 1.0, accuracy)
 
 
 def _triangle_area(cell):
@@ -200,7 +196,7 @@ def _triangle_area(cell):
     """
     u = cell[0] - cell[1]
     v = cell[0] - cell[2]
-    return numpy.linalg.norm(numpy.cross(u, v)) / 2.0
+    return np.linalg.norm(np.cross(u, v)) / 2.0
 
 
 def _quad_area(cell):
@@ -237,15 +233,15 @@ def test_area(filename, area_tria_ref, area_quad_ref, accuracy):
     tria = mesh.cells[ugrid_meshio_id["triangle"]]
     total_tri_area = 0
     for _cell in tria.data:
-        cell = numpy.array([mesh.points[i] for i in _cell])
+        cell = np.array([mesh.points[i] for i in _cell])
         a = _triangle_area(cell)
         total_tri_area += a
-    assert numpy.isclose(total_tri_area, area_tria_ref, accuracy)
+    assert np.isclose(total_tri_area, area_tria_ref, accuracy)
 
     quad = mesh.cells[ugrid_meshio_id["quad"]]
     total_quad_area = 0
     for _cell in quad.data:
-        cell = numpy.array([mesh.points[i] for i in _cell])
+        cell = np.array([mesh.points[i] for i in _cell])
         a = _quad_area(cell)
         total_quad_area += a
-    assert numpy.isclose(total_quad_area, area_quad_ref, accuracy)
+    assert np.isclose(total_quad_area, area_quad_ref, accuracy)

@@ -5,7 +5,7 @@ I/O for the Wavefront .obj file format, cf.
 import datetime
 import logging
 
-import numpy
+import numpy as np
 
 from ..__about__ import __version__
 from .._exceptions import WriteError
@@ -40,12 +40,11 @@ def read_buffer(f):
         split = strip.split()
 
         if split[0] == "v":
-            # vertex
-            points.append([numpy.float(item) for item in split[1:]])
+            points.append([float(item) for item in split[1:]])
         elif split[0] == "vn":
-            vertex_normals.append([numpy.float(item) for item in split[1:]])
+            vertex_normals.append([float(item) for item in split[1:]])
         elif split[0] == "vt":
-            texture_coords.append([numpy.float(item) for item in split[1:]])
+            texture_coords.append([float(item) for item in split[1:]])
         elif split[0] == "s":
             # "s 1" or "s off" controls smooth shading
             pass
@@ -67,9 +66,9 @@ def read_buffer(f):
     # Remove them.
     face_groups = [f for f in face_groups if len(f) > 0]
 
-    points = numpy.array(points)
-    texture_coords = numpy.array(texture_coords)
-    vertex_normals = numpy.array(vertex_normals)
+    points = np.array(points)
+    texture_coords = np.array(texture_coords)
+    vertex_normals = np.array(vertex_normals)
     point_data = {}
     if len(texture_coords) > 0:
         point_data["obj:vt"] = texture_coords
@@ -77,7 +76,7 @@ def read_buffer(f):
         point_data["obj:vn"] = vertex_normals
 
     # convert to numpy arrays
-    face_groups = [numpy.array(f) for f in face_groups]
+    face_groups = [np.array(f) for f in face_groups]
     cells = []
     for f in face_groups:
         if f.shape[1] == 3:
@@ -85,10 +84,10 @@ def read_buffer(f):
         elif f.shape[1] == 4:
             cells.append(CellBlock("quad", f - 1))
         else:
-            # Anything else but triangles or quads not supported yet
+            # Only triangles or quads supported for now
             logging.warning(
                 "meshio::obj only supports triangles and quads. "
-                "Skipping {} polygons with {} nodes".format(f.shape[0], f.shape[1])
+                f"Skipping {f.shape[0]} polygons with {f.shape[1]} nodes"
             )
 
     return Mesh(points, cells, point_data=point_data)
@@ -122,7 +121,7 @@ def write(filename, mesh):
             for vt in dat:
                 f.write(fmt.format(*vt))
 
-        for cell_type, cell_array in mesh.cells:
+        for _, cell_array in mesh.cells:
             fmt = "f " + " ".join(["{}"] * cell_array.shape[1]) + "\n"
             for c in cell_array:
                 f.write(fmt.format(*(c + 1)))

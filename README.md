@@ -11,8 +11,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/nschloe/meshio.svg?style=flat-square&logo=github&label=Stars&logoColor=white)](https://github.com/nschloe/meshio)
 [![PyPi downloads](https://img.shields.io/pypi/dm/meshio.svg?style=flat-square)](https://pypistats.org/packages/meshio)
 
-[![Slack](https://img.shields.io/static/v1?logo=slack&label=chat&message=on%20slack&color=4a154b&style=flat-square)](https://join.slack.com/t/nschloe/shared_invite/zt-cofhrwm8-BgdrXAtVkOjnDmADROKD7A
-)
+[![Discord](https://img.shields.io/static/v1?logo=discord&label=chat&message=on%20discord&color=7289da&style=flat-square)](https://discord.gg/Z6DMsJh4Hr)
 
 [![gh-actions](https://img.shields.io/github/workflow/status/nschloe/meshio/ci?style=flat-square)](https://github.com/nschloe/meshio/actions?query=workflow%3Aci)
 [![codecov](https://img.shields.io/codecov/c/github/nschloe/meshio.svg?style=flat-square)](https://codecov.io/gh/nschloe/meshio)
@@ -22,34 +21,34 @@
 There are various mesh formats available for representing unstructured meshes.
 meshio can read and write all of the following and smoothly converts between them:
 
-> [Abaqus](http://abaqus.software.polimi.it/v6.14/index.html),
- [ANSYS msh](https://www.afs.enea.it/fluent/Public/Fluent-Doc/PDF/chp03.pdf),
- [AVS-UCD](https://lanl.github.io/LaGriT/pages/docs/read_avs.html),
- [CGNS](https://cgns.github.io/),
- [DOLFIN XML](https://manpages.ubuntu.com/manpages/disco/man1/dolfin-convert.1.html),
- [Exodus](https://cubit.sandia.gov/public/13.2/help_manual/WebHelp/finite_element_model/exodus/block_specification.htm),
- [FLAC3D](https://www.itascacg.com/software/flac3d),
- [H5M](https://www.mcs.anl.gov/~fathom/moab-docs/h5mmain.html),
- [Kratos/MDPA](https://github.com/KratosMultiphysics/Kratos/wiki/Input-data),
- [Medit](https://people.sc.fsu.edu/~jburkardt/data/medit/medit.html),
- [MED/Salome](https://docs.salome-platform.org/latest/dev/MEDCoupling/developer/med-file.html),
- [Nastran](https://help.autodesk.com/view/NSTRN/2019/ENU/?guid=GUID-42B54ACB-FBE3-47CA-B8FE-475E7AD91A00) (bulk data),
+> [Abaqus](http://abaqus.software.polimi.it/v6.14/index.html) (`.inp`),
+ ANSYS msh (`.msh`),
+ [AVS-UCD](https://lanl.github.io/LaGriT/pages/docs/read_avs.html) (`.avs`),
+ [CGNS](https://cgns.github.io/) (`.cgns`),
+ [DOLFIN XML](https://manpages.ubuntu.com/manpages/disco/man1/dolfin-convert.1.html) (`.xml`),
+ [Exodus](https://nschloe.github.io/meshio/exodus.pdf) (`.e`, `.exo`),
+ [FLAC3D](https://www.itascacg.com/software/flac3d) (`.f3grid`),
+ [H5M](https://www.mcs.anl.gov/~fathom/moab-docs/h5mmain.html) (`.h5m`),
+ [Kratos/MDPA](https://github.com/KratosMultiphysics/Kratos/wiki/Input-data) (`.mdpa`),
+ [Medit](https://people.sc.fsu.edu/~jburkardt/data/medit/medit.html) (`.mesh`, `.meshb`),
+ [MED/Salome](https://docs.salome-platform.org/latest/dev/MEDCoupling/developer/med-file.html) (`.med`),
+ [Nastran](https://help.autodesk.com/view/NSTRN/2019/ENU/?guid=GUID-42B54ACB-FBE3-47CA-B8FE-475E7AD91A00) (bulk data, `.bdf`, `.fem`, `.nas`),
  [Neuroglancer precomputed format](https://github.com/google/neuroglancer/tree/master/src/neuroglancer/datasource/precomputed#mesh-representation-of-segmented-object-surfaces),
- [Gmsh](http://gmsh.info/doc/texinfo/gmsh.html#File-formats) (format versions 2.2, 4.0, and 4.1),
- [OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file),
- [OFF](https://segeval.cs.princeton.edu/public/off_format.html),
- [PERMAS](https://www.intes.de),
- [PLY](https://en.wikipedia.org/wiki/PLY_(file_format)),
- [STL](https://en.wikipedia.org/wiki/STL_(file_format)),
+ [Gmsh](https://gmsh.info/doc/texinfo/gmsh.html#File-formats) (format versions 2.2, 4.0, and 4.1, `.msh`),
+ [OBJ](https://en.wikipedia.org/wiki/Wavefront_.obj_file) (`.obj`),
+ [OFF](https://segeval.cs.princeton.edu/public/off_format.html) (`.off`),
+ [PERMAS](https://www.intes.de) (`.post`, `.post.gz`, `.dato`, `.dato.gz`),
+ [PLY](https://en.wikipedia.org/wiki/PLY_(file_format)) (`.ply`),
+ [STL](https://en.wikipedia.org/wiki/STL_(file_format)) (`.stl`),
  [Tecplot .dat](http://paulbourke.net/dataformats/tp/),
  [TetGen .node/.ele](https://wias-berlin.de/software/tetgen/fformats.html),
- [SVG](https://www.w3.org/TR/SVG/) (2D only, output only),
- [SU2](https://su2code.github.io/docs_v7/Mesh-File),
- [UGRID](http://www.simcenter.msstate.edu/software/downloads/doc/ug_io/3d_grid_file_type_ugrid.html),
- [VTK](https://www.vtk.org/wp-content/uploads/2015/04/file-formats.pdf),
- [VTU](https://www.vtk.org/Wiki/VTK_XML_Formats),
- [WKT](https://en.wikipedia.org/wiki/Well-known_text_representation_of_geometry) ([TIN](https://en.wikipedia.org/wiki/Triangulated_irregular_network)),
- [XDMF](http://www.xdmf.org/index.php/XDMF_Model_and_Format).
+ [SVG](https://www.w3.org/TR/SVG/) (2D output only) (`.svg`),
+ [SU2](https://su2code.github.io/docs_v7/Mesh-File) (`.su2`),
+ [UGRID](http://www.simcenter.msstate.edu/software/downloads/doc/ug_io/3d_grid_file_type_ugrid.html) (`.ugrid`),
+ [VTK](https://www.vtk.org/wp-content/uploads/2015/04/file-formats.pdf) (`.vtk`),
+ [VTU](https://www.vtk.org/Wiki/VTK_XML_Formats) (`.vtu`),
+ [WKT](https://en.wikipedia.org/wiki/Well-known_text_representation_of_geometry) ([TIN](https://en.wikipedia.org/wiki/Triangulated_irregular_network)) (`.wkt`),
+ [XDMF](https://www.xdmf.org/index.php/XDMF_Model_and_Format) (`.xdmf`, `.xmf`).
 
 Install with
 ```
@@ -71,6 +70,7 @@ meshio-ascii      input.msh              # convert to ASCII format
 with any of the supported formats.
 
 In Python, simply do
+<!--exdown-skip-->
 ```python
 import meshio
 
@@ -84,48 +84,46 @@ mesh = meshio.read(
 ```
 to read a mesh. To write, do
 ```python
-points = numpy.array(
-    [
-        [0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ]
-)
-cells = [("triangle", numpy.array([[0, 1, 2]]))]
-meshio.write_points_cells(
-    "foo.vtk",
+import meshio
+
+# two triangles and one quad
+points = [
+    [0.0, 0.0],
+    [1.0, 0.0],
+    [0.0, 1.0],
+    [1.0, 1.0],
+    [2.0, 0.0],
+    [2.0, 1.0],
+]
+cells = [
+    ("triangle", [[0, 1, 2], [1, 3, 2]]),
+    ("quad", [[1, 4, 5, 3]]),
+]
+
+mesh = meshio.Mesh(
     points,
     cells,
     # Optionally provide extra data on points, cells, etc.
-    # point_data=point_data,
-    # cell_data=cell_data,
-    # field_data=field_data
+    point_data={"T": [0.3, -1.2, 0.5, 0.7, 0.0, -3.0]},
+    # Each item in cell data must match the cells array
+    cell_data={"a": [[0.1, 0.2], [0.4]]},
 )
-```
-or explicitly create a mesh object for writing
-```python
-mesh = meshio.Mesh(points, cells)
-meshio.write(
-    "foo.vtk",  # str, os.PathLike, or buffer/ open file
-    mesh,
+mesh.write(
+    "foo.vtk",  # str, os.PathLike, or buffer/open file
     # file_format="vtk",  # optional if first argument is a path; inferred from extension
 )
 
-# mesh.vtk.write() is also possible
+# Alternative with the same options
+meshio.write_points_cells("foo.vtk", points, cells)
 ```
 For both input and output, you can optionally specify the exact `file_format`
 (in case you would like to enforce ASCII over binary VTK, for example).
 
-Reading and writing can also be handled directly by the `Mesh` object:
-```python
-m = meshio.Mesh.read(filename, "vtk")  # same arguments as meshio.read
-m.write("foo.vtk")  # same arguments as meshio.write, besides `mesh`
-```
-
 #### Time series
 
-The [XDMF format](http://www.xdmf.org/index.php/XDMF_Model_and_Format) supports time
+The [XDMF format](https://www.xdmf.org/index.php/XDMF_Model_and_Format) supports time
 series with a shared mesh. You can write times series data using meshio with
+<!--exdown-skip-->
 ```python
 with meshio.xdmf.TimeSeriesWriter(filename) as writer:
     writer.write_points_cells(points, cells)
@@ -133,6 +131,7 @@ with meshio.xdmf.TimeSeriesWriter(filename) as writer:
         writer.write_data(t, point_data={"phi": data})
 ```
 and read it with
+<!--exdown-skip-->
 ```python
 with meshio.xdmf.TimeSeriesReader(filename) as reader:
     points, cells = reader.read_points_cells()
@@ -191,7 +190,7 @@ and can be pulled in by
 pip install meshio[all]
 ```
 
-You can also install meshio from [anaconda](https://anaconda.org/conda-forge/meshio):
+You can also install meshio from [Anaconda](https://anaconda.org/conda-forge/meshio):
 ```
 conda install -c conda-forge meshio
 ```

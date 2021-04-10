@@ -2,7 +2,7 @@ import argparse
 import os
 import pathlib
 
-from .. import ansys, cgns, gmsh, h5m, mdpa, med, ply, stl, vtk, vtu, xdmf
+from .. import ansys, cgns, gmsh, h5m, mdpa, ply, stl, vtk, vtu, xdmf
 from .._helpers import _filetype_from_path, read, reader_map
 from ._helpers import _get_version_text
 
@@ -20,7 +20,7 @@ def compress(argv=None):
     mesh = read(args.infile, file_format=args.input_format)
 
     # # Some converters (like VTK) require `points` to be contiguous.
-    # mesh.points = numpy.ascontiguousarray(mesh.points)
+    # mesh.points = np.ascontiguousarray(mesh.points)
 
     # write it out
     if fmt == "ansys":
@@ -37,10 +37,6 @@ def compress(argv=None):
         )
     elif fmt == "mdpa":
         mdpa.write(args.infile, mesh, binary=True)
-    elif fmt == "med":
-        med.write(
-            args.infile, mesh, compression="gzip", compression_opts=9 if args.max else 4
-        )
     elif fmt == "ply":
         ply.write(args.infile, mesh, binary=True)
     elif fmt == "stl":

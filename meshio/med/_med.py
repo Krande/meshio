@@ -297,6 +297,11 @@ def write(filename, mesh):
     family_zero = families.create_group("FAMILLE_ZERO")  # must be defined in any case
     family_zero.attrs.create("NUM", 0)
 
+    if len(mesh.point_sets) > 0:
+        add_node_sets(nodes_group, mesh, families)
+    if len(mesh.cell_sets) > 0:
+        add_cell_sets(cells_group, mesh, families)
+
     # For point tags
     try:
         if len(mesh.point_tags) > 0:
@@ -357,6 +362,90 @@ def write(filename, mesh):
                 med_type,
             )
         name_idx += 1
+
+
+def add_cell_sets(cells_group, mesh, families):
+    """
+
+    :param cells_group:
+    :param mesh:
+    :param families:
+    :return:
+    """
+    # Cell tags
+    for k, (cell_type, cells) in enumerate(mesh.cells):
+        cell_data, cell_tags = set_to_tags(mesh.cell_sets, cells, -4)
+        med_type = meshio_to_med_type[cell_type]
+        med_cells = cells_group.get(med_type)
+        family = med_cells.create_dataset(
+            "FAM", data=cell_data
+        )
+        family.attrs.create("CGT", 1)
+        family.attrs.create("NBR", len(cells))
+
+        element = families.create_group("ELEME")
+        _write_families(element, cell_tags)
+
+
+def add_node_sets(nodes_group, mesh, families):
+    """
+
+    tags = {
+             2: ['Side'],
+             3: ['Side', 'Top'],
+             4: ['Top']
+        }
+
+    points = [0,0,0,2,2,0,0,...]
+
+    :param nodes_group:
+    :param mesh:
+    :param families:
+    :return:
+    """
+    points, tags = set_to_tags(mesh.point_sets, mesh.points, 2)
+
+    family = nodes_group.create_dataset("FAM", data=points)
+    family.attrs.create("CGT", 1)
+    family.attrs.create("NBR", len(mesh.points))
+
+    # For point tags
+    node = families.create_group("NOEUD")
+    _write_families(node, tags)
+
+
+def set_to_tags(sets, data, n_id):
+    """
+
+    :param sets:
+    :param data:
+    :return:
+    """
+    import logging
+
+    tags = dict()
+    tagged_data = np.zeros(len(data))
+    for name, nset in sets.items():
+        tags[n_id] = [name]
+        for n in nset[0]:
+            ind = int(n - 1)
+            if ind > len(tagged_data)-1:
+                print('d')
+            if tagged_data[ind] != 0:
+                not_used = True
+                for i, t in tags.items():
+                    if ind in t:
+                        not_used = False
+                        r = np.where(tagged_data == i)
+                new_int = max(tags.keys()) + 1
+            else:
+                logging.info("test")
+                tagged_data[ind] = n_id
+        if n_id > 0:
+            n_id += 1
+        else:
+            n_id -= 1
+    return tagged_data, tags
 
 
 def _write_data(

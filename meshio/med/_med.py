@@ -2,6 +2,8 @@
 I/O for MED/Salome, cf.
 <https://docs.salome-platform.org/latest/dev/MEDCoupling/developer/med-file.html>.
 """
+import logging
+
 import numpy as np
 
 from .._common import num_nodes_per_cell
@@ -83,9 +85,17 @@ def read(filename):
         point_tags = _read_families(fas["NOEUD"])
 
     point_sets = dict()
+    shared_sets = []
     if tags is not None:
         for key, val in point_tags.items():
-            point_sets[val[0]] = np.add(np.where(tags == key), 1)[0]
+            if len(val) > 1:
+                for v in val:
+                    shared_sets.append((v, np.add(np.where(tags == key), 1)[0]))
+            else:
+                point_sets[val[0]] = np.add(np.where(tags == key), 1)[0]
+
+    for v, s in shared_sets:
+        point_sets[v] = np.concatenate([point_sets[v], s])
 
     # CellBlock
     cells = []
@@ -112,8 +122,16 @@ def read(filename):
 
     cell_sets = dict()
     cell_tags_ = cell_data["cell_tags"][0]
+    shared_sets = []
     for key, val in cell_tags.items():
-        cell_sets[val[0]] = np.add(np.where(cell_tags_ == key), 1)
+        if len(val) > 1:
+            for v in val:
+                shared_sets.append((v, np.add(np.where(cell_tags_ == key), 1)))
+        else:
+            cell_sets[val[0]] = np.add(np.where(cell_tags_ == key), 1)
+
+    for v, s in shared_sets:
+        cell_sets[v] = np.array([np.concatenate([cell_sets[v][0], s[0]])])
 
     # Read nodal and cell data if they exist
     try:
@@ -395,39 +413,50 @@ def add_node_sets(nodes_group, mesh, families):
     _write_families(node, tags)
 
 
-def set_to_tags(sets, data, tag_start_id):
+def set_to_tags(sets, data, tag_start_int):
     """
 
     :param sets:
     :param data:
-    :param tag_start_id:
+    :param tag_start_int:
     :return:
     """
-    import logging
 
     tags = dict()
     tagged_data = np.zeros(len(data))
-    for name, set_data in sets.items():
-        tags[tag_start_id] = [name]
-        set_data = set_data if tag_start_id > 0 else set_data[0]
+    tag_int = tag_start_int
+    for name, set_data_ in sets.items():
+        tags[tag_int] = [name]
+        set_data = set_data_ if tag_int > 0 else set_data_[0]
         for n in set_data:
             ind = int(n - 1)
             # Check IF id is already defined in another set
             if tagged_data[ind] != 0:
-                logging.error("NotImplementedYet")
-                not_used = True
-                for i, t in tags.items():
-                    if ind in t:
-                        not_used = False
-                        r = np.where(tagged_data == i)
-                new_int = max(tags.keys()) + 1
+                existing_id = int(tagged_data[ind])
+                current_tags = tags[existing_id]
+                if name not in current_tags:
+                    all_tags = current_tags + [name]
+                    new_int = None
+                    for i_, t_ in tags.items():
+                        if all_tags in t_:
+                            new_int = i_
+                    if new_int is None:
+                        new_int = (
+                            int(max(tags.keys()) + 1)
+                            if tag_int > 0
+                            else int(min(tags.keys()) - 1)
+                        )
+                        tags[new_int] = tags[existing_id] + [name]
+                        tag_int = new_int
+                    tagged_data[ind] = new_int
+                else:
+                    raise ValueError("This should not happen")
             else:
-                logging.info("test")
-                tagged_data[ind] = tag_start_id
-        if tag_start_id > 0:
-            tag_start_id += 1
+                tagged_data[ind] = tag_int
+        if tag_int > 0:
+            tag_int += 1
         else:
-            tag_start_id -= 1
+            tag_int -= 1
     return tagged_data, tags
 
 

@@ -43,6 +43,8 @@ abaqus_to_meshio_type = {
     "S8R": "quad8",
     "S8R5": "quad8",
     "S9R5": "quad9",
+    # 4 node rigid shell element
+    "R3D4": "quad",
     # "QUAD": "quad",
     # "QUAD4": "quad",
     # "QUAD5": "quad5",
@@ -85,7 +87,8 @@ abaqus_to_meshio_type = {
     "C3D10MH": "tetra10",
     # "TETRA14": "tetra14",
     #
-    # "PYRAMID": "pyramid",
+    "C3D5": "pyramid",
+    "C3D5H": "pyramid",
     "C3D6": "wedge",
     #
     # 4-node bilinear displacement and pore pressure
